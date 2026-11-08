@@ -13,7 +13,7 @@ This builds `build/Buzzcord.app`, signs it with your Apple Development certifica
 
 `./build.sh dist` makes the release download, `dist/Buzzcord-<version>-mac.zip` and its `.sha256`. It is signed ad hoc (with a Developer ID Application certificate once there is one), because an Apple Development signature doesn't open on other Macs. Until it's notarized, people open it once with System Settings > Privacy & Security > Open Anyway. The version is set at the top of `build.sh`.
 
-Hidden checks: `Buzzcord.app/Contents/MacOS/Buzzcord --demo` opens the windows with made-up data (add `--notice`, `--login` or `--about` for the first-run notice, the sign-in window and the About box; the notice saves nothing in the demo), and `--gateway-test` confirms that Discord's rejection of a fake token (close code 4004) is detected.
+Hidden checks: `Buzzcord.app/Contents/MacOS/Buzzcord --demo` opens the windows with made-up data (add `--shots` for website screenshots with smiley avatars instead of Discord's logo; add `--notice`, `--login` or `--about` for the first-run notice, the sign-in window and the About box; the notice saves nothing in the demo), and `--gateway-test` confirms that Discord's rejection of a fake token (close code 4004) is detected.
 
 ## What's in it
 
