@@ -1,0 +1,6 @@
+<resources>
+    <style name="Theme.Buzzcord" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/window_bg</item>
+        <item name="android:statusBarColor">@color/brand_purple</item>
+    </style>
+</resources>
