@@ -87,7 +87,7 @@ namespace Buzzcord
                 if (!loaderSet)
                 {
                     // WebView2Loader.dll ships next to Buzzcord.exe in bin\.
-                    CoreWebView2Environment.SetLoaderDllFolderPath(Path.Combine(Shortcuts.Home, "bin"));
+                    CoreWebView2Environment.SetLoaderDllFolderPath(Shortcuts.BinDir);
                     loaderSet = true;
                 }
                 var env = await CoreWebView2Environment.CreateAsync(null, Path.Combine(Settings.Folder, "WebView2"));

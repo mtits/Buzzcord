@@ -1,0 +1,28 @@
+{
+  "Method": "ArtifactSigning",
+
+  "ArtifactSigning": {
+    "Endpoint": "<https://eus.codesigning.azure.net - must match your account's region>",
+    "CodeSigningAccountName": "<your Artifact Signing account name>",
+    "CertificateProfileName": "<your certificate profile name>",
+    "ExcludeCredentials": [
+      "ManagedIdentityCredential",
+      "WorkloadIdentityCredential",
+      "EnvironmentCredential",
+      "SharedTokenCacheCredential",
+      "VisualStudioCredential",
+      "VisualStudioCodeCredential",
+      "AzurePowerShellCredential",
+      "AzureDeveloperCliCredential"
+    ]
+  },
+
+  "Certificate": {
+    "Thumbprint": "<40 hex characters, for Method: Certificate>",
+    "MachineStore": false
+  },
+
+  "TimestampUrl": null,
+  "SignToolPath": null,
+  "DlibPath": null
+}

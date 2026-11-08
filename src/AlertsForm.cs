@@ -206,7 +206,7 @@ namespace Buzzcord
             MinimizeBox = false;
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.CenterParent;
-            ClientSize = new Size(340, 230);
+            ClientSize = new Size(340, 280);
 
             var header = new BufferedPanel { Dock = DockStyle.Top, Height = 64 };
             header.Paint += (s, e) =>
@@ -223,13 +223,20 @@ namespace Buzzcord
             };
             var text = new Label
             {
-                Text = "A lightweight, old-school messenger for Discord.\n\nUnofficial: not made or endorsed by Discord.\n\nIf Buzzcord makes your day a little better, you can buy me a coffee.",
-                Location = new Point(16, 76), Size = new Size(310, 100)
+                Text = "A lightweight, old-school messenger for Discord, by Marc Turtal.\n\n" +
+                       "Unofficial: not made, endorsed or supported by Discord Inc. Not affiliated with Yahoo. " +
+                       "Free and open source under the MIT License.\n\n" +
+                       "If Buzzcord makes your day a little better, you can buy me a coffee.",
+                Location = new Point(16, 76), Size = new Size(310, 120)
             };
-            var donate = new Button { Text = "Donate ♥ (PayPal)", AutoSize = true, Location = new Point(16, 186) };
+            var site = new LinkLabel { Text = "app.marcturtal.com/buzzcord", AutoSize = true, Location = new Point(16, 204) };
+            site.LinkClicked += (s, e) => Program.OpenUrl(Program.SiteUrl);
+            var source = new LinkLabel { Text = "Source code", AutoSize = true, Location = new Point(200, 204) };
+            source.LinkClicked += (s, e) => Program.OpenUrl(Program.SourceUrl);
+            var donate = new Button { Text = "Donate ♥ (PayPal)", AutoSize = true, Location = new Point(16, 236) };
             donate.Click += (s, e) => Program.OpenUrl(Program.DonateUrl);
-            var close = new Button { Text = "Close", DialogResult = DialogResult.OK, Location = new Point(250, 186) };
-            Controls.AddRange(new Control[] { text, donate, close });
+            var close = new Button { Text = "Close", DialogResult = DialogResult.OK, Location = new Point(250, 236) };
+            Controls.AddRange(new Control[] { text, site, source, donate, close });
             Controls.Add(header);
             AcceptButton = close;
             CancelButton = close;

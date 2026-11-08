@@ -35,7 +35,19 @@ namespace Buzzcord
             }
         }
 
-        static string Exe { get { return Path.Combine(Home, "bin", "Buzzcord.exe"); } }
+        // Folder holding Buzzcord.exe and its libraries: wherever the exe runs from (a release zip
+        // unpacked anywhere), or the project's bin\ when PowerShell hosts it.
+        public static string BinDir
+        {
+            get
+            {
+                string self = Application.ExecutablePath;
+                if (string.Equals(Path.GetFileName(self), "Buzzcord.exe", StringComparison.OrdinalIgnoreCase)) return Path.GetDirectoryName(self);
+                return Path.Combine(Home, "bin");
+            }
+        }
+
+        static string Exe { get { return Path.Combine(BinDir, "Buzzcord.exe"); } }
 
         // Once the exe is code-signed, Windows lets it run directly.
         public static bool ExeIsSigned
@@ -109,6 +121,7 @@ namespace Buzzcord
                 link.SetDescription("Buzzcord - old-school messenger for Discord");
                 string ico = Path.Combine(Home, "assets", "Buzzcord.ico");
                 if (File.Exists(ico)) link.SetIconLocation(ico, 0);
+                else if (File.Exists(Exe)) link.SetIconLocation(Exe, 0);   // release build: the exe carries the icon
                 link.SetShowCmd(7); // minimized: the console host never shows anything anyway
 
                 var store = (IPropertyStore)link;

@@ -11,3 +11,7 @@ obj/
 selftest.txt
 signing.json
 *.pfx
+
+# Signing tools downloaded by tools\get-signing-tools.ps1
+tools/signing/
+dist/

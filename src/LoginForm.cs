@@ -85,7 +85,7 @@ namespace Buzzcord
             useToken.Visible = false;
             tokenBox.Visible = true;
             tokenOk.Visible = true;
-            status.Text = "Paste the account token, then click Sign in.";
+            status.Text = "Paste your own token, then Sign in. Never paste one someone sent you.";
             tokenBox.Focus();
         }
 
