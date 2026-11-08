@@ -29,6 +29,9 @@ missing here. Fill in the "Windows since 2026-11-02" list and the Mac side gets 
 
 - **Launch safety (2026-11-08):** the one-time notice before the first sign-in (Windows `NoticeForm.cs`, Mac `Notice.swift`, same wording), the token box warning, and the About box (not affiliated with Discord Inc. or Yahoo, MIT License, site and source links). Difference: Windows ticks Start with Windows in the notice by default; the Mac's Open at Login box starts unticked.
 
+- **Updates from GitHub Releases (1.3, 2026-11-08):** checks 20 s after start and every 6 hours, downloads the platform's zip, checks its SHA-256, unpacks it refusing paths outside the staging folder, offers "Restart to update" (banner/balloon and a bold menu item), installs on the next start if ignored, rolls back on failure, and the restarted copy removes the old files. Options > Update Buzzcord Automatically, Help > Check for Updates. Windows: `Updater.cs` (renames each file to `.old`). Mac: `Updater.swift` (swaps the whole .app bundle, also checks the code signature, and refuses to run from Downloads, a disk image or App Translocation).
+- **Donate window (1.3):** PayPal (International), GCash and InstaPay bank QR codes (Philippines) from `assets/donate`, from Help, the tray/menu bar menu and About. Windows: `DonateForm.cs`. Mac: `Donate.swift`.
+
 ## Mac only (candidates to bring to Windows)
 
 - **Menu Bar Only:** hide the Dock icon. Not needed on Windows: Buzzcord already lives in the tray, and closing a buddy list only hides it.
@@ -53,4 +56,4 @@ Later, Windows ported the Mac-only features (see "Ported from the Mac"), so thos
 
 ## Building and checking the Mac side
 
-`cd mac && ./build.sh --install` builds a universal app. `swift test` runs 36 tests (MLS vectors, a full call against a fake voice server, game lists, rich presence socket, Auto-Away, devices, shortcut, unread, unfriend detection). Hidden checks are listed at the end of `mac/README.md`.
+`cd mac && ./build.sh --install` builds a universal app. `swift test` runs 45 tests (MLS vectors, a full call against a fake voice server, game lists, rich presence socket, Auto-Away, devices, shortcut, unread, unfriend detection). Hidden checks are listed at the end of `mac/README.md`.

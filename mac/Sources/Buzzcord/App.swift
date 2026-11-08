@@ -14,8 +14,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         menuBar.applyDockIcon()
         GlobalShortcut.shared.action = { [weak self] in self?.showAllBuddyLists() }
         GlobalShortcut.shared.apply()
-        Notifier.shared.setUp()
+        if Updater.testMode == nil { Notifier.shared.setUp() }
         Notifier.shared.onClick = { [weak self] key, cid in
+            if key == UpdateController.notifyKey { UpdateController.shared.clicked(cid); return }
             guard let a = self?.accounts.first(where: { $0.session.tokenKey == key }) else { return }
             if let c = a.session.findChannel(cid) { a.openChat(c) } else { a.buddy.showWindow(nil) }
         }
@@ -42,6 +43,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         if CommandLine.arguments.contains("--audio-test") { Demo.audioTest(); return }
         if CommandLine.arguments.contains("--audio-probe") { Demo.audioProbe(); return }
         if CommandLine.arguments.contains("--games-test") { Demo.gamesTest(); return }
+        // An update downloaded earlier goes in before anything opens.
+        if UpdateController.shared.installPendingAtLaunch() { return }
+        UpdateController.shared.onChange = { [weak self] in self?.menuBar.apply() }
+        UpdateController.shared.afterLaunch()
+        if Updater.testMode != nil { Log.write("update-test: started \(Updater.current) at \(Bundle.main.bundlePath)"); UpdateController.shared.check(manual: false); return }
+        UpdateController.shared.start()
         Task {
             await ClientInfo.loadBuildNumber()
             let tokens = Accounts.load()
@@ -128,7 +135,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
         let app = NSMenu(title: "Buzzcord")
         app.addItem(withTitle: "About Buzzcord", action: #selector(about(_:)), keyEquivalent: "")
-        app.addItem(withTitle: "Donate (PayPal)...", action: #selector(donate(_:)), keyEquivalent: "")
+        app.addItem(withTitle: "Check for Updates...", action: #selector(checkForUpdates(_:)), keyEquivalent: "")
+        app.addItem(withTitle: "Donate...", action: #selector(donate(_:)), keyEquivalent: "")
         app.addItem(.separator())
         app.addItem(withTitle: "Hide Buzzcord", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         let others = app.addItem(withTitle: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
@@ -222,6 +230,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         options.addItem(withTitle: "Share Hidden Games Again", action: #selector(unhideGames(_:)), keyEquivalent: "")
         options.addItem(.separator())
         options.addItem(withTitle: "Open at Login", action: #selector(toggleLogin(_:)), keyEquivalent: "")
+        options.addItem(withTitle: "Update Buzzcord Automatically", action: #selector(toggleAutoUpdate(_:)), keyEquivalent: "")
         options.addItem(withTitle: "Show Icon in Menu Bar", action: #selector(toggleMenuBarIcon(_:)), keyEquivalent: "")
         options.addItem(withTitle: "Menu Bar Only (Hide Dock Icon)", action: #selector(toggleMenuBarOnly(_:)), keyEquivalent: "")
         options.addItem(withTitle: "Buddy List Shortcut...", action: #selector(changeShortcut(_:)), keyEquivalent: "")
@@ -240,7 +249,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         help.addItem(withTitle: "Open Log Folder", action: #selector(openLogFolder(_:)), keyEquivalent: "")
         help.addItem(withTitle: "Show Crash Reports", action: #selector(showCrashReports(_:)), keyEquivalent: "")
         help.addItem(.separator())
-        help.addItem(withTitle: "Donate (PayPal)...", action: #selector(donate(_:)), keyEquivalent: "")
+        help.addItem(withTitle: "Check for Updates...", action: #selector(checkForUpdates(_:)), keyEquivalent: "")
+        help.addItem(withTitle: "Donate...", action: #selector(donate(_:)), keyEquivalent: "")
         help.addItem(withTitle: "About Buzzcord", action: #selector(about(_:)), keyEquivalent: "")
         add(main, help)
         NSApp.helpMenu = help
@@ -258,7 +268,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     static let siteUrl = "https://app.marcturtal.com/buzzcord/"
     static let sourceUrl = "https://github.com/mtits/Buzzcord"
 
-    @objc func donate(_ sender: Any?) { openExternal(AppDelegate.donateUrl) }
+    @objc func donate(_ sender: Any?) { DonateWindowController.show() }
+
+    @objc func checkForUpdates(_ sender: Any?) { UpdateController.shared.check(manual: true) }
+
+    @objc func toggleAutoUpdate(_ sender: Any?) { Prefs.set("AutoUpdate", !UpdateController.automatic) }
+
+    @objc func installUpdate(_ sender: Any?) { UpdateController.shared.install() }
+
+    // buzzcord://donate, from the About box's link (the standard About panel can only open URLs).
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for u in urls where u.scheme == "buzzcord" && u.host == "donate" { DonateWindowController.show() }
+    }
 
     @objc func about(_ sender: Any?) {
         let small = NSFont.systemFont(ofSize: 11)
@@ -277,7 +298,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         add("   ·   ")
         add("Source on GitHub", link: AppDelegate.sourceUrl)
         add("\n\nIf Buzzcord makes your day a little better, you can buy me a coffee:\n")
-        add("Donate \u{2665} (PayPal)", link: AppDelegate.donateUrl, bold: true)
+        add("Donate \u{2665}", link: "buzzcord://donate", bold: true)
         NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "Buzzcord", .credits: credits])
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -406,6 +427,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         case #selector(changeShortcut(_:)): item.title = "Buddy List Shortcut (\(GlobalShortcut.combo?.display ?? "off"))..."
         case #selector(toggleMenuBarOnly(_:)): item.state = MenuBarIcon.menuBarOnly ? .on : .off
         case #selector(toggleLogin(_:)): item.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        case #selector(toggleAutoUpdate(_:)): item.state = UpdateController.automatic ? .on : .off
         default: break
         }
         return true

@@ -94,6 +94,11 @@ final class MenuBarIcon: NSObject {
         add(menu, "Show All Buddy Lists", #selector(showAll(_:)))
         add(menu, "Mentions & Notifications", #selector(showAlerts(_:))).isHidden = app.accounts.isEmpty
         add(menu, "Add Account...", #selector(addAccount(_:)))
+        add(menu, "Donate \u{2665}...", #selector(donate(_:)))
+        if Updater.staged != nil, Updater.cannotInstall() == nil {
+            let up = add(menu, "Restart to Update to \(Updater.stagedVersion)", #selector(installUpdate(_:)))
+            up.attributedTitle = NSAttributedString(string: up.title, attributes: [.font: NSFont.boldSystemFont(ofSize: NSFont.systemFontSize)])
+        }
         menu.addItem(.separator())
         // With no Dock icon the app's own menu bar never shows, so its menus live here.
         if Self.menuBarOnly, let main = NSApp.mainMenu {
@@ -137,6 +142,10 @@ final class MenuBarIcon: NSObject {
     }
 
     @objc private func addAccount(_ sender: Any?) { app?.showLogin() }
+
+    @objc private func donate(_ sender: Any?) { DonateWindowController.show() }
+
+    @objc private func installUpdate(_ sender: Any?) { UpdateController.shared.install() }
 
     @objc private func about(_ sender: Any?) { app?.about(nil) }
 

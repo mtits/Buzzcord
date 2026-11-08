@@ -10,7 +10,7 @@
 # Privacy & Security > Open Anyway): an Apple Development signature doesn't open on other Macs.
 set -e
 cd "${0:A:h}"
-VERSION=1.2.0
+VERSION=1.3.0
 
 swift build -c release --arch arm64 --arch x86_64 2>&1 | grep -v "^\[" || true
 BIN=".build/apple/Products/Release/Buzzcord"
@@ -52,11 +52,18 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>NSHighResolutionCapable</key><true/>
   <key>NSMicrophoneUsageDescription</key><string>Buzzcord uses the microphone for voice calls.</string>
   <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
+  <key>CFBundleURLTypes</key><array><dict>
+    <key>CFBundleURLName</key><string>app.buzzcord.mac</string>
+    <key>CFBundleURLSchemes</key><array><string>buzzcord</string></array>
+  </dict></array>
   <key>NSHumanReadableCopyright</key><string>© 2026 Marc Turtal. MIT License.</string>
 </dict></plist>
 PLIST
 
 cp ../LICENSE "$APP/Contents/Resources/LICENSE.txt"
+# Donate window QR codes (GCash and InstaPay bank transfer).
+mkdir -p "$APP/Contents/Resources/donate"
+cp ../assets/donate/gcash.png ../assets/donate/bank.png "$APP/Contents/Resources/donate/"
 xattr -cr "$APP"
 
 if [[ "$1" == "dist" ]]; then

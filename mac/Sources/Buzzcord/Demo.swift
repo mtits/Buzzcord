@@ -89,6 +89,10 @@ enum Demo {
         }
         if CommandLine.arguments.contains("--shots") { screenshotLook(s, [alyssa, me, ben, dina, xenia, carlo]) }
         if CommandLine.arguments.contains("--about") { app.about(nil) }
+        if let i = CommandLine.arguments.firstIndex(of: "--donate") {
+            if i + 1 < CommandLine.arguments.count { DonateView.demoShown = DonateQR(rawValue: CommandLine.arguments[i + 1]) }
+            DonateWindowController.show()
+        }
         if CommandLine.arguments.contains("--login") {
             let login = LoginWindowController { _ in }
             login.showWindow(nil)
