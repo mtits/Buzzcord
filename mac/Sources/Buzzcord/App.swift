@@ -441,7 +441,10 @@ final class AccountController {
         }
         session.onUnfriended = { [weak self] id in
             guard let self else { return }
-            self.alert(.unfriended, nil, id, "Removed from friends", "\(self.session.name(id)) is no longer on your friends list.", sound: nil)
+            // With the username too: a display name can be changed, a username is who they are.
+            let u = self.session.user(id)
+            let name = u.displayName + (u.username.map { $0 != u.displayName ? " (\($0))" : "" } ?? "")
+            self.alert(.unfriended, nil, id, "\(name) is no longer your friend", "They removed you as a friend, or blocked you.", sound: "Funk")
         }
         session.onIncomingCall = { [weak self] cid in
             guard let self, let c = self.session.findChannel(cid), !VoiceManager.shared.isIn(self.session, cid) else { return }

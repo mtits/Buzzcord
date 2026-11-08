@@ -9,7 +9,7 @@ missing here. Fill in the "Windows since 2026-11-02" list and the Mac side gets 
 - Sign-in: QR code and token, several accounts, tokens in the keychain (Windows: DPAPI).
 - Buddy list: Favorites, Recent, Groups, Friends, Offline, Servers, Requests; search, Add a Friend, status and status message. No group reordering yet (Windows: Options > Arrange groups).
 - IM windows: history, pictures, GIFs, embeds, replies, reactions, edit, delete, typing, formatting, emoji, Send File, drag and drop, paste screenshots, BUZZ.
-- Notifications: DMs, mentions, followed channels, friend requests, sign-ins; mutes respected; Busy silences; pop-up IM windows; Dock badge (Windows: tray and taskbar badge).
+- Notifications: DMs, mentions, followed channels, friend requests, sign-ins, someone unfriending or blocking you (not when you removed them); mutes respected; Busy silences; pop-up IM windows; Dock badge (Windows: tray and taskbar badge).
 - Auto-save of files and the chat log, member sidebar, message search, Mentions & Notifications history.
 - Voice calls with DAVE (MLS checked against the IETF vectors in `testdata/mls`), voice activity and push-to-talk, per-user volume, ringing window.
 - Profiles with the game Board (Favorite, Rotation, Games I Like, Want to Play), game picker.
@@ -40,4 +40,4 @@ missing here. Fill in the "Windows since 2026-11-02" list and the Mac side gets 
 
 ## Building and checking the Mac side
 
-`cd mac && ./build.sh --install` builds a universal app. `swift test` runs 33 tests (MLS vectors, a full call against a fake voice server, game lists, rich presence socket, Auto-Away, devices, shortcut, unread). Hidden checks are listed at the end of `mac/README.md`.
+`cd mac && ./build.sh --install` builds a universal app. `swift test` runs 34 tests (MLS vectors, a full call against a fake voice server, game lists, rich presence socket, Auto-Away, devices, shortcut, unread, unfriend detection). Hidden checks are listed at the end of `mac/README.md`.

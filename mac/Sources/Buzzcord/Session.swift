@@ -336,9 +336,12 @@ final class Session: ObservableObject {
 
     // Ignores a request, cancels one you sent, or unfriends.
     func removeRelationship(_ userId: String, location: String) async throws {
-        removedByMe.insert(userId) // so the RELATIONSHIP_REMOVE that follows isn't reported as them unfriending you
+        noteRemovedByMe(userId)
         try await api.send("DELETE", "/users/@me/relationships/\(userId)", nil, location: location)
     }
+
+    // So the RELATIONSHIP_REMOVE that follows isn't reported as them unfriending you.
+    func noteRemovedByMe(_ userId: String) { removedByMe.insert(userId) }
 
     func openDm(_ userId: String) async throws -> Channel {
         if let c = privateChannels.values.first(where: { $0.isDm && $0.recipientIds == [userId] }) { return c }
