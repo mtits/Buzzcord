@@ -109,6 +109,8 @@ namespace Buzzcord
         public static void Ensure()
         {
             if (!RunningAsExe && !File.Exists(Path.Combine(Home, "run.ps1")) && !ExeIsSigned) return;
+            // A test copy with its own data folder must not repoint the real shortcuts at itself.
+            if (Environment.GetEnvironmentVariable("BUZZCORD_DATA") != null) return;
             try
             {
                 Create(StartMenuPath);
