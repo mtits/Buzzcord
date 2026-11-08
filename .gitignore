@@ -1,3 +1,13 @@
 .DS_Store
 # A separate project that lives in this folder
 RearFill/
+
+# Windows build output and local-only files
+bin/
+obj/
+*.exe
+*.pdb
+*.log
+selftest.txt
+signing.json
+*.pfx
