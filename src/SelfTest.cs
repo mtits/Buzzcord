@@ -625,12 +625,45 @@ namespace Buzzcord
             return null;
         }
 
+        static readonly Color[] artColors = { Color.FromArgb(0xF2, 0x9E, 0x4C), Color.FromArgb(0x5B, 0xA8, 0xE0), Color.FromArgb(0x8E, 0x6B, 0xD8),
+                                              Color.FromArgb(0x4C, 0xB8, 0x8A), Color.FromArgb(0xE0, 0x6B, 0x8B), Color.FromArgb(0xD8, 0xB0, 0x3C) };
+
+        // Avatars: a smiley on a pastel square. Game art: a play button on dark purple.
+        static Image FakeArt(string url)
+        {
+            bool avatar = url.Contains("/embed/avatars/") || url.Contains("/avatars/");
+            bool game = url.Contains("/app-assets/") || url.Contains("/app-icons/");
+            if (!avatar && !game) return null;
+            var bmp = new Bitmap(128, 128);
+            using (var g = Graphics.FromImage(bmp))
+            {
+                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                if (avatar)
+                {
+                    using (var br = new SolidBrush(artColors[(url.GetHashCode() & 0x7fffffff) % artColors.Length])) g.FillRectangle(br, 0, 0, 128, 128);
+                    g.DrawImage(Icons.Status("online", 80), new Rectangle(24, 24, 80, 80));
+                }
+                else
+                {
+                    using (var br = new System.Drawing.Drawing2D.LinearGradientBrush(new Rectangle(0, 0, 128, 128), Color.FromArgb(0x3A, 0x1F, 0x6B), Color.FromArgb(0x1A, 0x10, 0x30), 90f))
+                        g.FillRectangle(br, 0, 0, 128, 128);
+                    using (var pen = new Pen(Color.White, 6)) g.DrawEllipse(pen, 30, 30, 68, 68);
+                    g.FillPolygon(Brushes.White, new[] { new Point(56, 46), new Point(56, 82), new Point(84, 64) });
+                }
+            }
+            return bmp;
+        }
+
         static string RenderUi(string dir)
         {
             Directory.CreateDirectory(dir);
             Application.EnableVisualStyles();
             if (SynchronizationContext.Current == null) SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
             PresenceManager.Instance = new PresenceManager();
+            // The made-up accounts and games get drawn pictures, so the screenshots (also used on the
+            // website) show no Discord or game artwork.
+            ImageCache.Override = FakeArt;
             var s = FakeSession();
             var app = new AppContext(true, true);
             Theme.Init();
@@ -682,8 +715,6 @@ namespace Buzzcord
                 string author = i % 2 == 0 ? "200" : "100";
                 var m = Json.O("id", (t0 + (long)i * 50000000000L).ToString(), "channel_id", "500", "type", 0L, "content", lines[i],
                     "author", Json.O("id", author, "username", author == "100" ? "marc" : "alyssa"));
-                if (i == 2)
-                    m["attachments"] = new List<object> { Json.O("id", "77", "filename", "rank.png", "url", "https://cdn.discordapp.com/embed/avatars/3.png", "proxy_url", "https://cdn.discordapp.com/embed/avatars/3.png", "width", 128L, "height", 128L, "size", 4000L, "content_type", "image/png") };
                 chat.Add(m);
             }
             Pump(2500);
@@ -749,6 +780,11 @@ namespace Buzzcord
             Pump(4000);
             Capture(login, Path.Combine(dir, "login.png"));
             login.Close();
+            var notice = new NoticeForm { StartPosition = FormStartPosition.Manual, Location = new Point(980, 40) };
+            notice.Show();
+            Pump(500);
+            Capture(notice, Path.Combine(dir, "notice.png"));
+            notice.Close();
 
             // Auto-Away under your name, the quick-reply alert and the Unread Messages window.
             app.Windows.Add(list);

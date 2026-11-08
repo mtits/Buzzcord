@@ -14,16 +14,18 @@ using Microsoft.Win32;
 [assembly: AssemblyDescription("A lightweight, old-school messenger for Discord")]
 [assembly: AssemblyCompany("Marc Turtal")]
 [assembly: AssemblyCopyright("© 2026 Marc Turtal")]
-[assembly: AssemblyVersion("1.1.0.0")]
-[assembly: AssemblyFileVersion("1.1.0.0")]
-[assembly: AssemblyInformationalVersion("1.1.0")]
+[assembly: AssemblyVersion("1.2.0.0")]
+[assembly: AssemblyFileVersion("1.2.0.0")]
+[assembly: AssemblyInformationalVersion("1.2.0")]
 
 namespace Buzzcord
 {
     static class Program
     {
         public const string DonateUrl = "https://paypal.me/abstinencelolph";
-        public const string Version = "1.1";
+        public const string SiteUrl = "https://app.marcturtal.com/buzzcord/";
+        public const string SourceUrl = "https://github.com/mtits/Buzzcord";
+        public const string Version = "1.2";
 
         public static void OpenUrl(string url)
         {
@@ -40,11 +42,11 @@ namespace Buzzcord
             AppDomain.CurrentDomain.AssemblyResolve += (s, e) =>
             {
                 string name = new AssemblyName(e.Name).Name;
-                string path = Path.Combine(Shortcuts.Home, "bin", name + ".dll");
+                string path = Path.Combine(Shortcuts.BinDir, name + ".dll");
                 if (name.StartsWith("Microsoft.Web.WebView2")) return File.Exists(path) ? Assembly.LoadFrom(path) : null;
-                // Concentus (Opus codec) isn't code-signed: it lives in bin\voice, out of Windows' way,
+                // Concentus (Opus codec) isn't code-signed: it lives in voice\, out of Windows' way,
                 // and is loaded from bytes, so Smart App Control never sees a DLL load.
-                string voice = Path.Combine(Shortcuts.Home, "bin", "voice", name + ".dll");
+                string voice = Path.Combine(Shortcuts.BinDir, "voice", name + ".dll");
                 if (name == "Concentus" && File.Exists(voice)) return Assembly.Load(File.ReadAllBytes(voice));
                 return null;
             };
@@ -182,10 +184,9 @@ namespace Buzzcord
             tray.ContextMenuStrip = menu;
 
             Shortcuts.Ensure();
-            // Start with Windows is on unless turned off; refresh the command so it matches how
-            // Buzzcord launches now (signed exe, or the PowerShell route).
-            if (!Settings.Has("StartWithWindows")) { Settings.SetBool("StartWithWindows", true); Settings.Save(); }
-            if (Settings.GetBool("StartWithWindows", true)) SetStartWithWindows(true);
+            // Start with Windows is chosen in the first-run notice (or Options); refresh the command
+            // so it matches how Buzzcord launches now (signed exe, or the PowerShell route).
+            if (Settings.GetBool("StartWithWindows", false)) SetStartWithWindows(true);
 
             rpc.Start();
             pipeTimer.Tick += (s, e) => EnsurePipe();
@@ -207,7 +208,7 @@ namespace Buzzcord
             var tokens = Accounts.Load();
             if (tokens.Count == 0)
             {
-                if (!AddAccount()) { ExitAll(); return; }
+                if (!NoticeForm.Accept(null) || !AddAccount()) { ExitAll(); return; }
             }
             else
                 foreach (var t in tokens) Open(t, !background);

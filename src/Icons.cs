@@ -224,12 +224,16 @@ namespace Buzzcord
         static readonly Dictionary<string, Image> images = new Dictionary<string, Image>();
         static readonly Dictionary<string, List<Action<Image>>> pending = new Dictionary<string, List<Action<Image>>>();
 
+        // Test hook: supplies images without the network (the self-test's screenshots use it).
+        public static Func<string, Image> Override;
+
         // Calls back on the UI thread; immediately if the image is already here.
         public static void Get(string url, Action<Image> done)
         {
             if (string.IsNullOrEmpty(url)) return;
             Image img;
             if (images.TryGetValue(url, out img)) { if (img != null) done(img); return; }
+            if (Override != null && (img = Override(url)) != null) { images[url] = img; done(img); return; }
             List<Action<Image>> waiters;
             if (pending.TryGetValue(url, out waiters)) { waiters.Add(done); return; }
             pending[url] = new List<Action<Image>> { done };

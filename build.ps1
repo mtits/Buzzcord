@@ -1,12 +1,13 @@
 # Builds Buzzcord.exe with the C# compiler that ships with Windows (.NET Framework 4.8).
 # No SDK or Visual Studio needed.
-#   powershell -ExecutionPolicy Bypass -File build.ps1 [-Test] [-Live] [-Ui] [-Sign]
-# -Sign code-signs the exe with the same certificate setup as OLED Saver (its tools\signing.ps1 and
-# signing.json; see that project's SIGNING.md). A signed exe runs directly, without PowerShell.
+#   powershell -ExecutionPolicy Bypass -File build.ps1 [-Test] [-Live] [-Ui] [-Sign] [-Package]
+# -Sign code-signs the exe (tools\signing.ps1, configured by signing.json; see SIGNING.md).
+# A signed exe runs directly, without PowerShell, and Smart App Control lets it through.
+# -Package zips the exe, its libraries and the license files into dist\ for a release.
 # -Test runs the offline self-test; -Live adds checks that talk to Discord without signing in;
 # -Ui renders the windows with made-up data into bin\ui\*.png.
 # -Out builds somewhere else (e.g. while Buzzcord.exe is running and locked).
-param([switch]$Test, [switch]$Live, [switch]$Ui, [switch]$Sign, [string]$Out)
+param([switch]$Test, [switch]$Live, [switch]$Ui, [switch]$Sign, [switch]$Package, [string]$Out)
 
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
@@ -63,12 +64,8 @@ Compile $exe @("/win32icon:$icon")
 Write-Host "Built $exe ($([math]::Round((Get-Item $exe).Length / 1KB)) KB)"
 
 if ($Sign) {
-    $oled = Join-Path (Split-Path $root) 'OLED Saver for Windows'
-    $config = Join-Path $root 'signing.json'
-    if (-not (Test-Path $config)) { $config = Join-Path $oled 'signing.json' }
-    if (-not (Test-Path $config)) { throw "No signing.json yet: set up the certificate as described in $oled\SIGNING.md" }
-    . (Join-Path $oled 'tools\signing.ps1')
-    Invoke-CodeSigning -File $exe -ConfigPath $config -ToolsDir (Join-Path $oled 'tools\signing')
+    . (Join-Path $root 'tools\signing.ps1')
+    Invoke-CodeSigning -File $exe -ConfigPath (Join-Path $root 'signing.json') -ToolsDir (Join-Path $root 'tools\signing')
 }
 
 if ($Test -or $Live -or $Ui) {
@@ -79,4 +76,29 @@ if ($Test -or $Live -or $Ui) {
     $code = Invoke-Exe $exe $a
     Get-Content $report
     if ($code -ne 0) { throw 'Self-test failed' }
+}
+
+if ($Package) {
+    # Flat layout: the exe finds its libraries beside it (and Concentus in voice\).
+    $version = (Get-Item $exe).VersionInfo.ProductVersion
+    $dist = Join-Path $root 'dist'
+    $stage = Join-Path $dist "Buzzcord-$version"
+    if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+    New-Item -ItemType Directory -Force (Join-Path $stage 'voice') | Out-Null
+    Copy-Item $exe (Join-Path $stage 'Buzzcord.exe')
+    foreach ($dll in Get-ChildItem (Join-Path $root 'lib') -Filter *.dll) {
+        $dest = if ($dll.Name -eq 'Concentus.dll') { Join-Path $stage 'voice' } else { $stage }
+        Copy-Item $dll.FullName $dest
+    }
+    Copy-Item (Join-Path $root 'LICENSE') (Join-Path $stage 'LICENSE.txt')
+    Copy-Item (Join-Path $root 'THIRD-PARTY-NOTICES.md') (Join-Path $stage 'THIRD-PARTY-NOTICES.txt')
+    Copy-Item (Join-Path $root 'assets\README.txt') (Join-Path $stage 'README.txt')
+    $zip = Join-Path $dist "Buzzcord-$version-windows.zip"
+    if (Test-Path $zip) { Remove-Item $zip -Force }
+    Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip
+    $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+    Set-Content -Encoding ASCII "$zip.sha256" "$hash  $(Split-Path $zip -Leaf)"
+    $signed = (Get-AuthenticodeSignature $exe).Status -eq 'Valid'
+    Write-Host "Packaged $zip ($([math]::Round((Get-Item $zip).Length / 1KB)) KB, SHA-256 $hash)"
+    if (-not $signed) { Write-Warning 'Buzzcord.exe is not signed: Smart App Control will block it. Build with -Sign for a release.' }
 }

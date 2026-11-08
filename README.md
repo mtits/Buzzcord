@@ -1,18 +1,42 @@
 # Buzzcord
 
-A lightweight, old-school (Yahoo Messenger-style) messenger for Discord. Plain Windows controls, no Electron.
-Unofficial: Discord doesn't allow third-party clients for user accounts, so using it carries some risk to the accounts you sign in with.
+**A lightweight, old-school messenger for Discord.** Buddy list, IM windows, BUZZ!, smileys and the
+yellow-and-purple look of the classic messengers, with plain Windows controls instead of a 400 MB
+browser. Several accounts at once, rich presence on all of them, and voice calls.
 
-This is the Windows version (`src/`, C# and WinForms). The macOS port is in `mac/` (see `mac/README.md`), and `mac/PARITY.md` lists what each version has.
+<p align="center">
+  <img src="assets/screens/buddylist.png" alt="Buzzcord buddy list" width="300">
+  <img src="assets/screens/chat.png" alt="A Buzzcord IM window" width="480">
+</p>
 
-## Run
+> [!WARNING]
+> **Buzzcord is unofficial.** It isn't made, endorsed or supported by Discord Inc. Discord's Terms of
+> Service don't allow third-party clients on user accounts. Buzzcord behaves like Discord's own web app
+> and never automates anything, but Discord could still limit or ban accounts that use it.
+> **Use it at your own risk.**
 
-```
-powershell -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File run.ps1
-```
+## Download
 
-Smart App Control blocks the unsigned exe, so `run.ps1` loads it into PowerShell instead. On first start Buzzcord makes Start menu and desktop shortcuts (they launch through `conhost --headless`, so no console window flashes, and the taskbar shows Buzzcord, pinnable) and turns on Start with Windows (Options menu to turn off).
-Once the exe is code-signed (`build.ps1 -Sign`, same certificate setup as OLED Saver), the shortcuts and startup entry switch to running `bin\Buzzcord.exe` directly.
+**[Download the latest release](https://github.com/mtits/Buzzcord/releases/latest)** or get it from
+**[app.marcturtal.com/buzzcord](https://app.marcturtal.com/buzzcord/)**.
+
+- Windows 10 or 11, 64-bit. Nothing to install: .NET Framework 4.8 is already part of Windows.
+- The captcha window uses Microsoft Edge WebView2, which comes with Windows 11 (on Windows 10 it arrives with Microsoft Edge).
+- `Buzzcord.exe` is code-signed by **Marc Turtal**, so Smart App Control lets it run. If Windows shows
+  "Windows protected your PC" on a brand-new release, click **More info**, check that the publisher is
+  Marc Turtal, then **Run anyway**. If the publisher is anything else, don't run it.
+- Each release lists the zip's SHA-256 checksum, so you can check your download.
+
+## Getting started
+
+1. Unzip it anywhere you like, for example `Documents\Buzzcord`, and run `Buzzcord.exe`.
+2. Read the one-time notice, then sign in with the QR code: Discord on your phone > your profile
+   picture > **Scan QR Code**. Add more accounts later from the tray icon's menu.
+3. Buzzcord makes a Start menu and desktop shortcut, and lives in the notification area by the clock.
+4. For rich presence, quit the official Discord app first, so games find Buzzcord instead.
+
+This is the Windows version (`src/`, C# and WinForms). A macOS port is in `mac/` (see `mac/README.md`),
+and `mac/PARITY.md` compares the two.
 
 ## Features
 
@@ -55,11 +79,54 @@ Once the exe is code-signed (`build.ps1 -Sign`, same certificate setup as OLED S
 
 Not included: video calls and screen share, threads and forum channels, Nitro extras.
 
-## Build and test
+## Privacy and safety
+
+- **No password, ever.** Buzzcord signs in with Discord's QR code. A token box exists for people who
+  need it, but **never paste a token, script or "login code" someone sends you**: whoever has your token
+  controls your account. That's the most common way Discord accounts get stolen.
+- **Your sign-in stays on your PC.** Tokens are encrypted with Windows DPAPI for your Windows user, in
+  `%APPDATA%\Buzzcord\accounts.dat`. They're never written to the log.
+- **No telemetry, no ads, no update pings.** Buzzcord only connects to Discord's own servers, to hCaptcha
+  when Discord asks for a captcha, and to the image addresses Discord sends (avatars, attachments,
+  Spotify album art). Links open in your browser only when you click them.
+- **Game detection only reads process names**, the same way Discord does. It never opens, reads or
+  injects into a game, so it's safe alongside anti-cheats like Vanguard.
+- **Everything else stays local:** settings and the log are in `%APPDATA%\Buzzcord`, saved files and chat
+  logs in `Documents\Buzzcord Saved` (both can be turned off in Options).
+- **It's open source.** Every line is in this repository, so anyone can check what it does.
+- **Only download it from here** (GitHub Releases) **or app.marcturtal.com.** Copies elsewhere could be
+  tampered with. Found a security problem? See [SECURITY.md](SECURITY.md).
+
+## Buy me a coffee
+
+Buzzcord is free, with no ads and no tracking, and it'll stay that way. It's made by one person in
+the Philippines, on evenings and weekends. If it brought a bit of the old messenger magic back to your
+desktop, a small donation keeps it going and pays for the code signing that lets Windows trust it.
+
+**[Donate with PayPal](https://paypal.me/abstinencelolph)**, or from **Help > Donate** in the app. Thank you!
+
+## Build from source
 
 ```
-powershell -ExecutionPolicy Bypass -File build.ps1 [-Test] [-Live] [-Ui] [-Out <path>]
+powershell -ExecutionPolicy Bypass -File build.ps1 [-Test] [-Live] [-Ui] [-Sign] [-Package] [-Out <path>]
 ```
 
-`-Test` runs the offline self-test, `-Live` adds checks against Discord that don't sign in (gateway handshake, QR login code), and `-Ui` renders the windows with made-up data into `bin\ui\*.png`.
+It builds with the C# compiler that's part of Windows (.NET Framework 4.8): no SDK or Visual Studio needed.
+
+- `-Test` runs the offline self-test, and `-Live` adds checks against Discord that don't sign in (gateway handshake, QR login code).
+- `-Ui` renders the windows with made-up data into `bin\ui\*.png`.
+- `-Sign` code-signs the exe (see [SIGNING.md](SIGNING.md)), and `-Package` makes the release zip in `dist\`.
+
+An unsigned build is blocked by Smart App Control, so `run.ps1` runs it inside PowerShell instead:
+
+```
+powershell -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File run.ps1
+```
+
 The log is `%APPDATA%\Buzzcord\buzzcord.log`.
+
+## License
+
+Buzzcord is free and open source under the [MIT License](LICENSE). © 2026 Marc Turtal.
+Bundled components keep their own licenses: see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+"Discord" is a trademark of Discord Inc. Buzzcord isn't affiliated with Discord or Yahoo.
