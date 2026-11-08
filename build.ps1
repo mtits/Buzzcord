@@ -21,6 +21,10 @@ New-Item -ItemType Directory -Force $bin, (Join-Path $root 'assets') | Out-Null
 $sources = Get-ChildItem (Join-Path $root 'src') -Filter *.cs -Recurse | ForEach-Object { $_.FullName }
 $common = @('/nologo', '/target:winexe', '/platform:anycpu', '/optimize+', '/codepage:65001', '/nowarn:1998',
             '/reference:System.dll', '/reference:System.Core.dll', '/reference:System.Drawing.dll', '/reference:System.Numerics.dll',
+            '/reference:System.IO.Compression.dll',
+            # The donate window's QR codes live inside the exe.
+            "/resource:$(Join-Path $root 'assets\donate\gcash.png'),Buzzcord.Donate.gcash.png",
+            "/resource:$(Join-Path $root 'assets\donate\bank.png'),Buzzcord.Donate.bank.png",
             '/reference:System.Windows.Forms.dll', '/reference:System.Net.Http.dll', '/reference:System.Security.dll',
             "/reference:$(Join-Path $root 'lib\Microsoft.Web.WebView2.Core.dll')", "/reference:$(Join-Path $root 'lib\Microsoft.Web.WebView2.WinForms.dll')",
             "/reference:$(Join-Path $root 'lib\Concentus.dll')", '/reference:System.Runtime.dll',

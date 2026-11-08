@@ -9,7 +9,9 @@ with steps to reproduce if you can. I'll reply as soon as I can and credit you i
 ## What Buzzcord promises
 
 - Sign-in tokens are stored only on the user's PC, encrypted with Windows DPAPI (`%APPDATA%\Buzzcord\accounts.dat`), and never logged.
-- Buzzcord sends tokens only to Discord. It contacts no server of its own: no telemetry, analytics or update checks.
+- Buzzcord sends tokens only to Discord. It contacts no server of its own: no telemetry or analytics.
+- Update checks ask GitHub's public API for this repository's latest release. An update is installed only if its zip matches
+  the SHA-256 file published in the same release, and its files can't land outside Buzzcord's folder.
 - Game detection only compares process names. Buzzcord never opens, reads or injects into other processes.
 - Official builds are published only on [GitHub Releases](https://github.com/mtits/Buzzcord/releases)
   and [app.marcturtal.com/buzzcord](https://app.marcturtal.com/buzzcord/), and each release lists the zip's SHA-256.

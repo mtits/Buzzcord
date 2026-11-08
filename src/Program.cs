@@ -1,6 +1,7 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Drawing;
 using System.IO;
 using System.Net;
 using System.Reflection;
@@ -13,10 +14,10 @@ using Microsoft.Win32;
 [assembly: AssemblyProduct("Buzzcord")]
 [assembly: AssemblyDescription("A lightweight, old-school messenger for Discord")]
 [assembly: AssemblyCompany("Marc Turtal")]
-[assembly: AssemblyCopyright("© 2026 Marc Turtal")]
-[assembly: AssemblyVersion("1.2.0.0")]
-[assembly: AssemblyFileVersion("1.2.0.0")]
-[assembly: AssemblyInformationalVersion("1.2.0")]
+[assembly: AssemblyCopyright("Â© 2026 Marc Turtal")]
+[assembly: AssemblyVersion("1.3.0.0")]
+[assembly: AssemblyFileVersion("1.3.0.0")]
+[assembly: AssemblyInformationalVersion("1.3.0")]
 
 namespace Buzzcord
 {
@@ -25,7 +26,8 @@ namespace Buzzcord
         public const string DonateUrl = "https://paypal.me/abstinencelolph";
         public const string SiteUrl = "https://app.marcturtal.com/buzzcord/";
         public const string SourceUrl = "https://github.com/mtits/Buzzcord";
-        public const string Version = "1.2";
+        // From the exe's own version (AssemblyVersion below), e.g. "1.3.0".
+        public static string Version { get { return typeof(Program).Assembly.GetName().Version.ToString(3); } }
 
         public static void OpenUrl(string url)
         {
@@ -73,7 +75,36 @@ namespace Buzzcord
             catch (InvalidOperationException) { } // already set when hosted in another process
 
             bool firstInstance;
-            using (var mutex = new Mutex(true, @"Local\Buzzcord.SingleInstance", out firstInstance))
+            // A copy with its own data folder (BUZZCORD_DATA, used for testing) is a separate instance.
+            string data = Environment.GetEnvironmentVariable("BUZZCORD_DATA");
+            string lockName = @"Local\Buzzcord.SingleInstance" + (data != null ? "." + (data.ToLowerInvariant().GetHashCode() & 0x7fffffff) : "");
+            var mutex = new Mutex(true, lockName, out firstInstance);
+            // Just updated: the old copy is still closing, so wait for it to let go.
+            for (int i = 0; !firstInstance && Has(args, "--updated") && i < 40; i++)
+            {
+                mutex.Dispose();
+                Thread.Sleep(500);
+                mutex = new Mutex(true, lockName, out firstInstance);
+            }
+            // An update downloaded earlier goes in now, before anything opens: let go of the lock,
+            // swap the files, start the new copy (which waits for this one to finish) and leave.
+            if (firstInstance && !Has(args, "--updated") && Updater.CanInstall && Updater.Staged != null && Settings.GetBool("AutoUpdate", true))
+            {
+                try
+                {
+                    mutex.Dispose();
+                    Updater.InstallAndRestart(Has(args, "--background"));
+                    return 0;
+                }
+                catch (Exception ex)
+                {
+                    Log("update install: " + ex);
+                    Settings.Set("UpdateStaged", "");
+                    Settings.Save();
+                    mutex = new Mutex(true, lockName, out firstInstance);
+                }
+            }
+            using (mutex)
             {
                 if (!firstInstance)
                 {
@@ -177,6 +208,9 @@ namespace Buzzcord
                 menu.Items.Add(new ToolStripSeparator());
                 menu.Items.Add("Add account...", null, (a, b) => AddAccount());
                 menu.Items.Add("Rich presence status", null, (a, b) => MessageBox.Show(RpcStatus(), "Buzzcord"));
+                menu.Items.Add("Donate \u2665", null, (a, b) => DonateForm.Open(null));
+                if (Updater.Staged != null && Updater.CanInstall)
+                    menu.Items.Add(new ToolStripMenuItem("Restart to update to " + Updater.StagedVersion, null, (a, b) => InstallUpdate(false)) { Font = new Font(menu.Font, FontStyle.Bold) });
                 menu.Items.Add(new ToolStripSeparator());
                 menu.Items.Add("Exit", null, (a, b) => ExitAll());
                 e.Cancel = false;
@@ -196,6 +230,18 @@ namespace Buzzcord
             GlobalHotkey.Instance = new GlobalHotkey(ShowAll);
             if (!GlobalHotkey.Instance.Apply())
                 tray.ShowBalloonTip(6000, "Buddy list shortcut is off", GlobalHotkey.Instance.Problem, ToolTipIcon.Warning);
+
+            // Updates: first look 20 s after start, then every 6 hours.
+            updateTimer.Tick += (s, e) => { updateTimer.Interval = 6 * 3600 * 1000; CheckForUpdates(false); };
+            updateTimer.Start();
+            string from = Settings.Get("UpdatedFrom", "");
+            if (from.Length > 0)
+            {
+                Settings.Set("UpdatedFrom", "");
+                Settings.Save();
+                Task.Run(() => Updater.CleanupOld(Shortcuts.BinDir));
+                BalloonAction(6000, "Buzzcord is up to date", "Updated to " + Program.Version + ". Click to see what's new.", () => Program.OpenUrl(Updater.ReleasesUrl + "/latest"));
+            }
 
             Start(background);
         }
@@ -261,6 +307,9 @@ namespace Buzzcord
 
         public void ExitAll()
         {
+            badgeTimer.Stop();
+            pipeTimer.Stop();
+            updateTimer.Stop();
             foreach (var w in new List<BuddyListForm>(windows))
             {
                 w.Session.Stop();
@@ -305,6 +354,7 @@ namespace Buzzcord
             if (string.IsNullOrEmpty(text)) text = "(sent a file)";
             if (text.Length > 200) text = text.Substring(0, 200) + "...";
             string prefix = windows.Count > 1 && from.Session.Me != null ? "[" + from.Session.Me.DisplayName + "] " : "";
+            balloonAction = null;
             balloonFrom = from;
             balloonChannel = channelId;
             balloonUser = userId;
@@ -317,8 +367,95 @@ namespace Buzzcord
             QuickReplyForm.Show(from, title, text, channelId, messageId, account);
         }
 
+        Action balloonAction;
+
+        // A tray balloon that runs an action when clicked (updates, donations).
+        public void BalloonAction(int ms, string title, string text, Action clicked)
+        {
+            balloonFrom = null;
+            balloonAction = clicked;
+            tray.ShowBalloonTip(ms, title, text, ToolTipIcon.Info);
+        }
+
+        // ---- updates ----
+
+        readonly System.Windows.Forms.Timer updateTimer = new System.Windows.Forms.Timer { Interval = 20000 };
+        bool checking;
+
+        // manual: from Help > Check for updates, which always answers. The timer stays quiet unless
+        // there's news, and only runs while automatic updates are on.
+        public async void CheckForUpdates(bool manual)
+        {
+            if (checking || (!manual && !Settings.GetBool("AutoUpdate", true))) return;
+            checking = true;
+            try
+            {
+                if (Updater.Staged != null) { UpdateReady(manual, null); return; }
+                var r = await Updater.Check();
+                if (r == null)
+                {
+                    if (manual) MessageBox.Show("You have the latest Buzzcord (" + Program.Version + ").", "Buzzcord");
+                    return;
+                }
+                if (!Updater.CanInstall)
+                {
+                    // Running from source: just say so, once per release.
+                    if (manual || Settings.Get("UpdateNoticed", "") != r.Tag)
+                    {
+                        Settings.Set("UpdateNoticed", r.Tag);
+                        Settings.Save();
+                        BalloonAction(8000, "Buzzcord " + r.Version.ToString(3) + " is out", "Click to open the download page.", () => Program.OpenUrl(r.PageUrl));
+                    }
+                    return;
+                }
+                await Updater.Download(r);
+                Program.Log("update: " + r.Tag + " downloaded and verified");
+                UpdateReady(manual, r);
+            }
+            catch (Exception ex)
+            {
+                Program.Log("update: " + ex.Message);
+                if (manual) MessageBox.Show("Couldn't check for updates: " + ex.Message, "Buzzcord");
+            }
+            finally { checking = false; }
+        }
+
+        void UpdateReady(bool manual, Updater.Release r)
+        {
+            string v = Updater.StagedVersion;
+            if (manual)
+            {
+                string notes = r != null ? Updater.Summary(r) : "";
+                var answer = MessageBox.Show("Buzzcord " + v + " is ready to install." + (notes.Length > 0 ? "\n\n" + notes : "") +
+                    "\n\nRestart now to update? (Otherwise it installs the next time Buzzcord starts.)", "Update ready", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+                if (answer == DialogResult.Yes) InstallUpdate(false);
+                return;
+            }
+            BalloonAction(10000, "Buzzcord " + v + " is ready", "Click to restart and update now, or it installs the next time Buzzcord starts.", () => InstallUpdate(false));
+        }
+
+        // Swaps in the downloaded files and restarts. False if it couldn't (Buzzcord keeps running).
+        public bool InstallUpdate(bool background)
+        {
+            try
+            {
+                Updater.InstallAndRestart(background);
+                ExitAll();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Program.Log("update install: " + ex);
+                Settings.Set("UpdateStaged", "");
+                Settings.Save();
+                MessageBox.Show("Couldn't install the update: " + ex.Message + "\n\nYou can download it from " + Updater.ReleasesUrl + ".", "Buzzcord");
+                return false;
+            }
+        }
+
         void BalloonClicked()
         {
+            if (balloonAction != null) { var a = balloonAction; balloonAction = null; a(); return; }
             var w = balloonFrom;
             if (w == null || w.IsDisposed) { ShowAll(); return; }
             if (balloonChannel != null) w.OpenChatById(balloonChannel);
