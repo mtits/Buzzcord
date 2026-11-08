@@ -158,7 +158,7 @@ function setTheme(css){document.getElementById('theme').textContent=css;}
                       .Append(AppLink("react", id + "/" + EmojiKey(emoji))).Append("\">");
                     if (emoji != null && emoji.Str("id") != null)
                         sb.Append("<img class=\"e\" style=\"width:16px;height:16px\" src=\"https://cdn.discordapp.com/emojis/").Append(E(emoji.Str("id"))).Append(emoji.Bool("animated") ? ".gif" : ".png").Append("?size=32\" alt=\"").Append(E(emoji.Str("name"))).Append("\">");
-                    else if (emoji != null) sb.Append(E(emoji.Str("name")));
+                    else if (emoji != null) sb.Append(EmojiImg(emoji.Str("name"), 16) ?? E(emoji.Str("name")));
                     sb.Append(" ").Append(r.Long("count")).Append("</a>");
                 }
                 sb.Append("</div>");
@@ -166,6 +166,15 @@ function setTheme(css){document.getElementById('theme').textContent=css;}
 
             sb.Append("</div>");
             return sb.ToString();
+        }
+
+        // An <img> of a unicode emoji in color, or null when color emoji can't be drawn.
+        public static string EmojiImg(string emoji, int px)
+        {
+            string uri = string.IsNullOrEmpty(emoji) ? null : Emoji.DataUri(emoji, px);
+            if (uri == null) return null;
+            return "<img class=\"emo\" src=\"" + uri + "\" alt=\"" + E(emoji) + "\" width=\"" + px + "\" height=\"" + px
+                + "\" style=\"vertical-align:" + (px > 24 ? "middle" : "-4px") + ";margin:0 1px\">";
         }
 
         // How Discord names an emoji in reaction URLs: "name:id" for custom ones, the character itself otherwise.
@@ -344,6 +353,9 @@ function setTheme(css){document.getElementById('theme').textContent=css;}
 
             text = CodeBlock.Replace(text, m => hold("<pre>" + E(m.Groups[1].Value.TrimEnd('\n')) + "</pre>"));
             text = InlineCode.Replace(text, m => hold("<code>" + E(m.Groups[1].Value) + "</code>"));
+            // Color emoji as pictures (IE draws them in black and white); emoji-only messages are big.
+            int px = Emoji.OnlyEmoji(text) ? 44 : 20;
+            text = Emoji.ReplaceAll(text, e => { string img = EmojiImg(e, px); return img != null ? hold(img) : e; });
             text = E(text);
 
             text = UserMention.Replace(text, m => hold("<a class=\"mention\" href=\"" + AppLink("profile", m.Groups[1].Value) + "\">@" + E(s.NameOf(m.Groups[1].Value)) + "</a>"));

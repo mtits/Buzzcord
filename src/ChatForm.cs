@@ -278,46 +278,14 @@ namespace Buzzcord
             input.Focus();
         }
 
-        static readonly string[] Smileys = {
-            "\U0001F600", "\U0001F602", "\U0001F923", "\U0001F60A", "\U0001F60D", "\U0001F618", "\U0001F61C", "\U0001F60E",
-            "\U0001F914", "\U0001F610", "\U0001F644", "\U0001F62D", "\U0001F621", "\U0001F631", "\U0001F634", "\U0001F973",
-            "\U0001F44D", "\U0001F44E", "\U0001F44F", "\U0001F64F", "\U0001F525", "❤️", "\U0001F494", "\U0001F480",
-            "\U0001F440", "\U0001F389", "\U0001F4AF", "✅", "❌", "\U0001F3AE", "\U0001F37A", "\U0001F355" };
-
         void BuildEmoji(ToolStripDropDownButton button)
         {
-            var drop = new ToolStripDropDown { LayoutStyle = ToolStripLayoutStyle.Table };
-            ((TableLayoutSettings)drop.LayoutSettings).ColumnCount = 8;
-            foreach (var e in Smileys)
-            {
-                string value = e;
-                var item = new ToolStripButton(e) { Font = new Font("Segoe UI Emoji", 13f), AutoSize = false, Size = new Size(32, 32) };
-                item.Click += (o, a) => { drop.Close(); Insert(value); };
-                drop.Items.Add(item);
-            }
+            var face = Emoji.Get("🙂", 20);
+            if (face != null) { button.Image = face; button.DisplayStyle = ToolStripItemDisplayStyle.Image; }
             var g = s.GuildOf(channel);
-            if (g != null && g.Emojis.Count > 0)
-            {
-                // This server's own emoji, shown by name (images load lazily in the list).
-                var more = new ToolStripMenuItem(g.Name + " emoji...");
-                more.Click += (o, a) =>
-                {
-                    drop.Close();
-                    var menu = new ContextMenuStrip { MaximumSize = new Size(260, 500) };
-                    foreach (var em in g.Emojis)
-                    {
-                        if (em.Bool("animated") || em.Has("available") && !em.Bool("available")) continue;
-                        string code = "<:" + em.Str("name") + ":" + em.Str("id") + ">";
-                        var it = new ToolStripMenuItem(":" + em.Str("name") + ":", null, (o2, a2) => Insert(code));
-                        string url = "https://cdn.discordapp.com/emojis/" + em.Str("id") + ".png?size=32";
-                        ImageCache.Get(url, img => it.Image = img);
-                        menu.Items.Add(it);
-                    }
-                    menu.Show(input, new Point(0, 0), ToolStripDropDownDirection.AboveRight);
-                };
-                drop.Items.Add(more);
-            }
-            button.DropDown = drop;
+            // Server emoji go in as <:name:id>; animated ones need Nitro, so they're left out.
+            button.DropDown = new EmojiPicker(g != null ? g.Emojis : null, false,
+                it => Insert(it.Text ?? "<:" + it.Name + ":" + it.Id + ">"));
             button.ShowDropDownArrow = false;
         }
 
@@ -564,31 +532,14 @@ namespace Buzzcord
             catch (Exception ex) { statusLabel.Text = ex.Message; }
         }
 
-        // The little smiley picker for "react", at the mouse.
+        // The smiley picker for "react", at the mouse.
         void PickReaction(string mid)
         {
-            var menu = new ContextMenuStrip { LayoutStyle = ToolStripLayoutStyle.Table };
-            ((TableLayoutSettings)menu.LayoutSettings).ColumnCount = 8;
-            foreach (var e in Smileys)
-            {
-                string value = e;
-                var item = new ToolStripButton(e) { Font = new Font("Segoe UI Emoji", 13f), AutoSize = false, Size = new Size(32, 32) };
-                item.Click += async (o, a) => { menu.Close(); await React(mid, value, true); };
-                menu.Items.Add(item);
-            }
             var g = s.GuildOf(channel);
-            if (g != null)
-                foreach (var em in g.Emojis)
-                {
-                    if (em.Has("available") && !em.Bool("available")) continue;
-                    string key = em.Str("name") + ":" + em.Str("id");
-                    var item = new ToolStripButton { AutoSize = false, Size = new Size(32, 32), ToolTipText = ":" + em.Str("name") + ":", DisplayStyle = ToolStripItemDisplayStyle.Image };
-                    ImageCache.Get("https://cdn.discordapp.com/emojis/" + em.Str("id") + ".png?size=32", img => item.Image = img);
-                    item.Click += async (o, a) => { menu.Close(); await React(mid, key, true); };
-                    menu.Items.Add(item);
-                    if (menu.Items.Count >= 64) break;
-                }
-            menu.Show(Cursor.Position);
+            var picker = new EmojiPicker(g != null ? g.Emojis : null, true,
+                async it => await React(mid, it.Text ?? it.Name + ":" + it.Id, true));
+            picker.Closed += (o, e) => BeginInvoke((Action)picker.Dispose);
+            picker.Show(Cursor.Position);
         }
 
         public void Deleted(string id)

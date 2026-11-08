@@ -357,12 +357,14 @@ namespace Buzzcord
             options.DropDownItems.Add(new ToolStripSeparator());
             options.DropDownItems.Add(Toggle("Detect running games", "DetectGames", true, on => { PresenceManager.Instance.Detector.Enabled = on; PresenceManager.Instance.Detector.Scan(); }));
             options.DropDownItems.Add(Toggle("Start with Windows", null, AppContext.StartsWithWindows, on => AppContext.SetStartWithWindows(on)));
+            options.DropDownItems.Add(Toggle("Update Buzzcord automatically", "AutoUpdate", true));
 
             var help = new ToolStripMenuItem("&Help");
             help.DropDownItems.Add("Rich presence status...", null, (s, e) => MessageBox.Show(this, app.RpcStatus(), "Buzzcord"));
             help.DropDownItems.Add("Open log folder", null, (s, e) => OpenFolder(Settings.Folder));
             help.DropDownItems.Add(new ToolStripSeparator());
-            help.DropDownItems.Add("Donate (PayPal)...", null, (s, e) => Program.OpenUrl(Program.DonateUrl));
+            help.DropDownItems.Add("Check for updates...", null, (s, e) => app.CheckForUpdates(true));
+            help.DropDownItems.Add("Donate...", null, (s, e) => DonateForm.Open(this));
             help.DropDownItems.Add("About Buzzcord", null, (s, e) => AboutForm.Open(this));
 
             menu.Items.AddRange(new ToolStripItem[] { messenger, status, options, help });

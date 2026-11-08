@@ -68,7 +68,9 @@ and `mac/PARITY.md` compares the two.
 - Buddy list shortcut: Ctrl+Alt+B brings every buddy list to the front from any app. Options > Buddy list shortcut changes it or turns it off; if another app already uses the combination, Buzzcord says so.
 - Message archive: DM and group chat text is appended to `Chat log.txt` beside the auto-saved files.
 - Reactions: click a reaction to add or remove yours, or use "react" on a message for the smiley picker.
-- Help > Donate (PayPal) and About.
+- Color emoji everywhere: in messages (emoji-only messages show big, like Discord), reactions and the smiley picker.
+- Updates itself: it checks GitHub for a new release when it starts and every 6 hours, downloads it in the background, checks it against the release's SHA-256, and installs it when you restart (or the next time Buzzcord starts). Old files are cleaned up. Options > Update Buzzcord automatically; Help > Check for updates.
+- Help > Donate (PayPal, GCash or bank transfer) and About.
 - Voice calls (no video):
   - **Server voice channels** appear in the buddy list with the people in them. Double-click one to join; whoever's talking is outlined in green.
   - **DMs and group chats:** the Call button in the chat window rings them. Incoming calls pop up a ringing window with Answer and Ignore, and missed calls go into the notification history.
@@ -88,9 +90,11 @@ Not included: video calls and screen share, threads and forum channels, Nitro ex
   controls your account. That's the most common way Discord accounts get stolen.
 - **Your sign-in stays on your PC.** Tokens are encrypted with Windows DPAPI for your Windows user, in
   `%APPDATA%\Buzzcord\accounts.dat`. They're never written to the log.
-- **No telemetry, no ads, no update pings.** Buzzcord only connects to Discord's own servers, to hCaptcha
-  when Discord asks for a captcha, and to the image addresses Discord sends (avatars, attachments,
-  Spotify album art). Links open in your browser only when you click them.
+- **No telemetry, no ads.** Buzzcord only connects to Discord's own servers, to hCaptcha when Discord asks
+  for a captcha, to the image addresses Discord sends (avatars, attachments, Spotify album art), and to
+  GitHub to check for updates (it asks GitHub's public API for the latest release and sends nothing about
+  you; Options > Update Buzzcord automatically turns it off). Links open in your browser only when you
+  click them.
 - **Game detection only reads process names**, the same way Discord does. It never opens, reads or
   injects into a game, so it's safe alongside anti-cheats like Vanguard.
 - **Everything else stays local:** settings and the log are in `%APPDATA%\Buzzcord`, saved files and chat
@@ -105,7 +109,11 @@ Buzzcord is free, with no ads and no tracking, and it'll stay that way. It's mad
 the Philippines, on evenings and weekends. If it brought a bit of the old messenger magic back to your
 desktop, a small donation keeps it going and helps pay for a code-signing certificate, so Windows stops warning about it.
 
-**[Donate with PayPal](https://paypal.me/abstinencelolph)**, or from **Help > Donate** in the app. Thank you!
+- **Anywhere:** [Donate with PayPal](https://paypal.me/abstinencelolph)
+- **Philippines:** GCash or bank transfer (InstaPay): scan the QR code on
+  [app.marcturtal.com/buzzcord](https://app.marcturtal.com/buzzcord/#donate) or in the app under **Help > Donate**.
+
+Thank you!
 
 ## Build from source
 

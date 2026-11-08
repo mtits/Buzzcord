@@ -46,6 +46,10 @@ namespace Buzzcord
             Check("Notification reply targeting", ReplyTargetTest);
             Check("Buddy list shortcut parsing", HotkeyParseTest);
             Check("Server member list", MemberListTest);
+            Check("Color emoji", EmojiTest);
+            Check("Updates: versions, releases, unpacking", UpdateParseTest);
+            Check("Updates: swapping files and rolling back", UpdateApplyTest);
+            Check("Donate QR codes", DonateQrTest);
             Check("Voice: AES-GCM", GcmTest);
             Check("Voice: HKDF and MLS encoding", HkdfAndTlsTest);
             Check("Voice: P-256 keys, ECDH, ECDSA", P256Test);
@@ -73,6 +77,7 @@ namespace Buzzcord
             {
                 Check("Gateway rejects a fake token with 4004", GatewayTest);
                 Check("QR login handshake reaches a code", () => RemoteAuthTest(uiDir));
+                Check("Updates: GitHub's latest release", UpdateLiveTest);
             }
             if (uiDir != null) Check("Render windows", () => RenderUi(uiDir));
 
@@ -301,7 +306,7 @@ namespace Buzzcord
         [DllImport("user32.dll")]
         static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
 
-        static void Capture(Form f, string path)
+        static void Capture(Control f, string path)
         {
             using (var bmp = new Bitmap(f.Width, f.Height))
             {
@@ -397,6 +402,142 @@ namespace Buzzcord
             Assert(GameBoard.Change(widgets, "played_games", "10", false) == null && GameBoard.Entries(widgets, "played_games").Count == 1, "remove");
             Assert(new List<string>(GameBoard.GameIds(widgets)).Count == 8, "game ids");
             Assert(widgets.Count == 5 && ((JObj)widgets[3]).Obj("data").Str("application_id") == "99", "other widgets must be kept");
+            return null;
+        }
+
+        static string EmojiTest()
+        {
+            var img = Emoji.Get("\U0001F600", 48);
+            Assert(img != null, "no color emoji (DirectWrite unavailable?)");
+            int yellow = 0, clear = 0;
+            for (int y = 0; y < img.Height; y++)
+                for (int x = 0; x < img.Width; x++)
+                {
+                    var c = img.GetPixel(x, y);
+                    if (c.A == 0) clear++;
+                    else if (c.A > 200 && c.R > 200 && c.G > 140 && c.B < 120) yellow++;
+                }
+            Assert(yellow > 200, "the grinning face isn't yellow (" + yellow + " yellow pixels): drawn in black and white?");
+            Assert(clear > 200, "no transparent background");
+            Assert(Emoji.Get("\U0001F600", 48) == img, "not cached");
+
+            // Sequences count as one emoji; plain text and digits don't count at all.
+            Func<string, int> one = e => Emoji.Match(e, 0) == e.Length ? 1 : 0;
+            Assert(one("\U0001F44D\U0001F3FD") == 1, "thumbs up with a skin tone");
+            Assert(one("\U0001F468‍\U0001F469‍\U0001F467") == 1, "family (ZWJ sequence)");
+            Assert(one("❤️") == 1 && one("1️⃣") == 1 && one("\U0001F1F5\U0001F1ED") == 1, "heart, keycap, flag");
+            Assert(Emoji.Match("123", 0) == 0 && Emoji.Match("☺", 0) == 0 && Emoji.Match("abc", 0) == 0, "text taken for emoji");
+            Assert(Emoji.ReplaceAll("a\U0001F600b✅", e => "[" + e.Length + "]") == "a[2]b[1]", "replace");
+            Assert(Emoji.OnlyEmoji("\U0001F525 \U0001F525") && !Emoji.OnlyEmoji("hot \U0001F525"), "emoji-only check");
+
+            var s = FakeSession();
+            string html = MessageHtml.Content(s, "gg \U0001F525 `\U0001F600 in code`");
+            Assert(html.Contains("<img class=\"emo\"") && html.Contains("width=\"20\""), "emoji in text not drawn in color: " + html.Substring(0, Math.Min(200, html.Length)));
+            Assert(html.Contains("<code>&#128512; in code</code>") || html.Contains("<code>\U0001F600 in code</code>"), "emoji in code changed");
+            Assert(MessageHtml.Content(s, "\U0001F525\U0001F525").Contains("width=\"44\""), "emoji-only message not big");
+            return yellow + " yellow px";
+        }
+
+        static string UpdateParseTest()
+        {
+            Assert(Updater.ParseTag("v1.3.0") == new Version(1, 3, 0, 0), "v1.3.0");
+            Assert(Updater.ParseTag("1.10") == new Version(1, 10, 0, 0), "1.10");
+            Assert(Updater.ParseTag("v2.0.0-beta") == null, "pre-release accepted");
+            Assert(Updater.ParseTag("latest") == null, "junk accepted");
+            Assert(Updater.ParseTag("v1.10.0") > Updater.ParseTag("v1.9.9"), "1.10 > 1.9.9");
+            var j = Json.ParseObj(@"{""tag_name"":""v9.1.0"",""html_url"":""https://github.com/mtits/Buzzcord/releases/tag/v9.1.0"",""body"":""## What's new\n- **Color** emoji\n"",
+                ""draft"":false,""prerelease"":false,""assets"":[
+                {""name"":""Buzzcord-9.1.0-mac.zip"",""browser_download_url"":""https://example.com/mac.zip""},
+                {""name"":""Buzzcord-9.1.0-windows.zip"",""browser_download_url"":""https://example.com/win.zip""},
+                {""name"":""Buzzcord-9.1.0-windows.zip.sha256"",""browser_download_url"":""https://example.com/win.zip.sha256""}]}");
+            var r = Updater.ParseRelease(j);
+            Assert(r != null && r.Version == new Version(9, 1, 0, 0), "release version");
+            Assert(r.ZipUrl == "https://example.com/win.zip" && r.ShaUrl == "https://example.com/win.zip.sha256", "picked the wrong assets");
+            Assert(Updater.Summary(r) == "What's new\n- Color emoji", "summary: " + Updater.Summary(r));
+            j["prerelease"] = true;
+            Assert(Updater.ParseRelease(j) == null, "pre-release offered");
+            Assert(Updater.Hash(System.Text.Encoding.ASCII.GetBytes("abc")) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "sha-256");
+
+            // A zip that tries to write outside its folder is refused.
+            string dir = Path.Combine(Path.GetTempPath(), "Buzzcord-update-test");
+            var ms = new MemoryStream();
+            using (var z = new System.IO.Compression.ZipArchive(ms, System.IO.Compression.ZipArchiveMode.Create, true))
+            {
+                using (var w = new StreamWriter(z.CreateEntry("Buzzcord.exe").Open())) w.Write("new exe");
+                using (var w = new StreamWriter(z.CreateEntry("voice/Concentus.dll").Open())) w.Write("new dll");
+            }
+            Updater.Unpack(ms.ToArray(), dir);
+            Assert(File.ReadAllText(Path.Combine(dir, "voice", "Concentus.dll")) == "new dll", "unpack");
+            var bad = new MemoryStream();
+            using (var z = new System.IO.Compression.ZipArchive(bad, System.IO.Compression.ZipArchiveMode.Create, true))
+                using (var w = new StreamWriter(z.CreateEntry("../evil.txt").Open())) w.Write("x");
+            bool refused = false;
+            try { Updater.Unpack(bad.ToArray(), dir + "-bad"); } catch (InvalidOperationException) { refused = true; }
+            Assert(refused && !File.Exists(Path.Combine(Path.GetTempPath(), "evil.txt")), "path escape not refused");
+            Directory.Delete(dir, true);
+            if (Directory.Exists(dir + "-bad")) Directory.Delete(dir + "-bad", true);
+            return null;
+        }
+
+        static string UpdateApplyTest()
+        {
+            string root = Path.Combine(Path.GetTempPath(), "Buzzcord-apply-test");
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+            string bin = Path.Combine(root, "bin"), staged = Path.Combine(root, "staged");
+            Directory.CreateDirectory(Path.Combine(bin, "voice"));
+            Directory.CreateDirectory(Path.Combine(staged, "voice"));
+            File.WriteAllText(Path.Combine(bin, "Buzzcord.exe"), "old exe");
+            File.WriteAllText(Path.Combine(bin, "voice", "Concentus.dll"), "old dll");
+            File.WriteAllText(Path.Combine(staged, "Buzzcord.exe"), "new exe");
+            File.WriteAllText(Path.Combine(staged, "voice", "Concentus.dll"), "new dll");
+            File.WriteAllText(Path.Combine(staged, "README.txt"), "new readme");
+
+            // A file in use (opened without sharing) can't be renamed: everything rolls back.
+            using (new FileStream(Path.Combine(bin, "voice", "Concentus.dll"), FileMode.Open, FileAccess.Read, FileShare.None))
+            {
+                bool failed = false;
+                try { Updater.Apply(staged, bin); } catch (Exception) { failed = true; }
+                Assert(failed, "apply should fail while a file is locked");
+            }
+            Assert(File.ReadAllText(Path.Combine(bin, "Buzzcord.exe")) == "old exe", "exe not rolled back");
+            Assert(!File.Exists(Path.Combine(bin, "README.txt")) && !File.Exists(Path.Combine(bin, "Buzzcord.exe.old")), "rollback left files");
+
+            // A running exe can be renamed, which is what makes the real swap work.
+            Updater.Apply(staged, bin);
+            Assert(File.ReadAllText(Path.Combine(bin, "Buzzcord.exe")) == "new exe", "exe not replaced");
+            Assert(File.ReadAllText(Path.Combine(bin, "voice", "Concentus.dll")) == "new dll", "dll not replaced");
+            Assert(File.ReadAllText(Path.Combine(bin, "Buzzcord.exe.old")) == "old exe", "old copy not kept until restart");
+            Updater.CleanupOld(bin);
+            Assert(Directory.GetFiles(bin, "*.old", SearchOption.AllDirectories).Length == 0, "old copies not cleaned up");
+            Directory.Delete(root, true);
+            return null;
+        }
+
+        static string UpdateLiveTest()
+        {
+            var t = System.Threading.Tasks.Task.Run(async () =>
+            {
+                using (var http = new System.Net.Http.HttpClient())
+                {
+                    http.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "Buzzcord-selftest");
+                    return await http.GetStringAsync("https://api.github.com/repos/" + Updater.Repo + "/releases/latest");
+                }
+            });
+            Assert(t.Wait(20000), "GitHub didn't answer in 20 s");
+            var r = Updater.ParseRelease(Json.ParseObj(t.Result));
+            Assert(r != null, "the latest release couldn't be read");
+            Assert(r.ZipUrl != null && r.ShaUrl != null, r.Tag + " has no Windows zip and checksum: updates would skip it");
+            return r.Tag + (r.Version > Updater.Current ? " (newer than this build)" : " (not newer than this build)");
+        }
+
+        static string DonateQrTest()
+        {
+            foreach (var name in new[] { "gcash.png", "bank.png" })
+                using (var img = DonateForm.LoadQr(name))
+                {
+                    Assert(img != null, name + " isn't built into the exe");
+                    Assert(img.Width >= 400 && img.Width == img.Height, name + " is " + img.Width + "x" + img.Height);
+                }
             return null;
         }
 
@@ -706,8 +847,8 @@ namespace Buzzcord
             long t0 = 1300000000000000000L;
             string[] lines = {
                 "hey are you on later?",
-                "yeah after dinner **for sure**",
-                "bring the duo, we're 2 games from Immortal :fire:",
+                "yeah after dinner **for sure** 😎",
+                "bring the duo, we're 2 games from Immortal 🔥🔥",
                 "check this clip https://example.com/clip",
                 "> that ace was insane\nI know right `ez`" };
             for (int i = 0; i < lines.Length; i++)
@@ -785,6 +926,19 @@ namespace Buzzcord
             Pump(500);
             Capture(notice, Path.Combine(dir, "notice.png"));
             notice.Close();
+            var picker = new EmojiPicker(null, false, it => { });
+            picker.Show(new Point(980, 60));
+            Pump(600);
+            Capture(picker, Path.Combine(dir, "emoji-picker.png"));
+            picker.Close();
+            var donate = new DonateForm { StartPosition = FormStartPosition.Manual, Location = new Point(980, 40) };
+            donate.Show();
+            Pump(300);
+            Capture(donate, Path.Combine(dir, "donate.png"));
+            foreach (Control c in donate.Controls) if (c is Button && c.Text.StartsWith("GCash")) ((Button)c).PerformClick();
+            Pump(500);
+            Capture(donate, Path.Combine(dir, "donate-gcash.png"));
+            donate.Close();
 
             // Auto-Away under your name, the quick-reply alert and the Unread Messages window.
             app.Windows.Add(list);

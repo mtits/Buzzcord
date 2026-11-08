@@ -233,8 +233,8 @@ namespace Buzzcord
             site.LinkClicked += (s, e) => Program.OpenUrl(Program.SiteUrl);
             var source = new LinkLabel { Text = "Source code", AutoSize = true, Location = new Point(200, 204) };
             source.LinkClicked += (s, e) => Program.OpenUrl(Program.SourceUrl);
-            var donate = new Button { Text = "Donate ♥ (PayPal)", AutoSize = true, Location = new Point(16, 236) };
-            donate.Click += (s, e) => Program.OpenUrl(Program.DonateUrl);
+            var donate = new Button { Text = "Donate ♥", AutoSize = true, Location = new Point(16, 236) };
+            donate.Click += (s, e) => { Close(); DonateForm.Open(null); };
             var close = new Button { Text = "Close", DialogResult = DialogResult.OK, Location = new Point(250, 236) };
             Controls.AddRange(new Control[] { text, site, source, donate, close });
             Controls.Add(header);
