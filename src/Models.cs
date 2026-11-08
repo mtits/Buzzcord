@@ -155,6 +155,7 @@ namespace Buzzcord
         public List<string> RecipientIds = new List<string>();
         public List<Overwrite> Overwrites = new List<Overwrite>();
 
+        public bool IsRequest;   // message request, or a DM Discord filtered as spam
         public bool IsPrivate { get { return Type == 1 || Type == 3; } }
         public bool IsDm { get { return Type == 1; } }
         public bool IsGroup { get { return Type == 3; } }
@@ -181,6 +182,7 @@ namespace Buzzcord
             if (j.Has("last_message_id")) LastMessageId = j.Str("last_message_id");
             if (j.Has("icon")) Icon = j.Str("icon");
             if (j.Has("owner_id")) OwnerId = j.Str("owner_id");
+            if (j.Has("is_message_request") || j.Has("is_spam")) IsRequest = j.Bool("is_message_request") || j.Bool("is_spam");
             if (j.Has("position")) Position = (int)j.Long("position");
             if (j.Has("recipient_ids"))
             {

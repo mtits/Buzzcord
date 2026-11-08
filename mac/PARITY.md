@@ -19,15 +19,19 @@ missing here. Fill in the "Windows since 2026-11-02" list and the Mac side gets 
 - Help menu: Rich Presence Status, Open Log Folder, Donate (PayPal), About.
 - Mic and speaker picker for calls.
 
+## Ported from the Mac (should match)
+
+- **Auto-Away:** Away after N idle minutes (Options > Auto-Away: Off, 5, 10, 15, 30; default 10) or when the screen locks; back on input. The presence says `status: "idle"`, `afk: true`, `since` = when you went away; the saved status isn't changed, and Busy and Invisible keep their status (`afk` is still sent, as on the Mac). "Away (idle)" under your name. Mac: `AutoAway.swift`, `Session.shownStatus`. Windows: `AutoAway.cs` (GetLastInputInfo, SystemEvents.SessionSwitch for lock/unlock), `Session.ShownStatus`, `Session.SetAutoAway`.
+- **Reply from a message alert**, and **Mark as Read**; in a server channel the reply references the alerted message, in DMs and groups it's a plain message; a failed reply shows an alert with the text you typed. Mac: the notification banner (`Support.swift` Notifier, `AccountController.replyFromBanner`). Windows: tray balloons can't hold a text box or buttons, so message alerts (DMs, mentions, followed channels) use a small pop-up by the clock with a reply box, Reply, Mark as Read and Open (`QuickReplyForm.cs`, `Session.ReplyTargetFor`). Other alerts keep the balloon, and so do message alerts while a game runs.
+- **Global shortcut** that brings every buddy list forward from any app, changeable or off. Mac: Option+Command+B (`Shortcut.swift`). Windows: Ctrl+Alt+B, Options > Buddy list shortcut, RegisterHotKey; if another app has the combination, a tray balloon says so (`GlobalHotkey.cs`).
+- **Unread Messages window** with message previews, Open, Mark as Read and Mark All as Read; it lists exactly what the unread count counts. Mac: Shift+Command+U or the menu bar icon (`Unread.swift`). Windows: Ctrl+Shift+U (Messenger menu) or the tray menu (`UnreadForm.cs`, `Session.UnreadEntries`, which the tray and taskbar numbers now add up).
+- **The red (1) fix:** message requests (and DMs Discord filtered as spam) never count as unread, and a DM with no read marker from Discord (never opened anywhere) only counts while its last message is under 14 days old. Mac: `Session.isUnread`, `neverOpenedCounts`. Windows: `Session.IsUnread`, `Session.NeverOpenedCounts`, `Channel.IsRequest`.
+
 ## Mac only (candidates to bring to Windows)
 
-- **Auto-Away:** Away after N idle minutes (Options > Auto-Away: off, 5, 10, 15, 30) or when the screen locks; back on input. Shows Away with `afk: true` without changing the saved status; Busy and Invisible untouched. `AutoAway.swift`, `Session.shownStatus`.
-- **Reply from the notification banner** and **Mark as Read**; in a server channel the reply references the alerted message. `Support.swift` (Notifier), `AccountController.replyFromBanner`.
-- **Global shortcut** (default Option+Command+B, changeable, can be turned off) that brings every buddy list forward. `Shortcut.swift`.
-- **Unread Messages window** (Shift+Command+U, or from the menu bar icon): lists exactly what the unread count counts. DMs Discord has no read marker for no longer show a red (1). `Unread.swift`.
-- **Menu Bar Only:** hide the Dock icon. Windows already lives in the tray, so probably nothing to do.
+- **Menu Bar Only:** hide the Dock icon. Not needed on Windows: Buzzcord already lives in the tray, and closing a buddy list only hides it.
 - **"Don't Share" for one game** and Share Hidden Games Again. Windows has no per-game hiding, only the per-account switch and Detect running games.
-- **Echo cancellation fallback:** tries voice processing on the chosen pair, checks that sound really moves, else runs mic and speakers separately, else falls back to the system default; switches over when devices are plugged in or out mid-call. `VoiceAudio.swift`.
+- **Echo cancellation fallback:** tries voice processing on the chosen pair, checks that sound really moves, else runs mic and speakers separately, else falls back to the system default; switches over when devices are plugged in or out mid-call. `VoiceAudio.swift`. Not ported: Windows calls have no echo cancellation at all yet (the mic and speakers always run separately, and the README says to use headphones), so the problem this works around (voice processing failing when the mic and speakers are separate USB devices) can't happen there.
 
 ## Not on the Mac
 
@@ -42,6 +46,8 @@ missing here. Fill in the "Windows since 2026-11-02" list and the Mac side gets 
 Nothing. The newest change in `src/` is from 2026-11-02 09:11 (Philippine time), the profile game Board, and the Mac port already has the Board, so the copy it was written from was current. The repo's `src/` (added in the `windows-source` PR) is the same code.
 
 Windows features from before the copy that the Mac doesn't have, or does differently, are listed under "Not on the Mac" above. They were missing from this file before.
+
+Later, Windows ported the Mac-only features (see "Ported from the Mac"), so those need nothing on the Mac side. One thing found while porting that the Mac should fix: **Mark All as Read** in the Unread window calls `Session.markRead(_:)` in a loop, but `markRead` skips the ack to Discord when the previous one was under a second ago, so on each account only the first chat's read marker reaches Discord (threads aside, which use the unthrottled `markRead(channelId:upTo:)`; the others are read in Buzzcord only and come back as unread after a restart or on the phone). Windows spaces them 1.1 seconds apart (`UnreadForm.MarkAll`).
 
 ## Building and checking the Mac side
 

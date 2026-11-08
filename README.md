@@ -36,6 +36,10 @@ Once the exe is code-signed (`build.ps1 -Sign`, same certificate setup as OLED S
 - Member sidebar: server channels show Discord's member list (role groups, online/offline, role colours, what people are playing); group chats list their members, online first. Click someone for their profile; View > Show members hides it.
 - Unfriend alerts: when someone removes (or blocks) you, it's shown and kept in the notification history.
 - Friend sign-in alerts with a door chime (Options to turn off). Unread count on the tray icon and a badge on the taskbar button.
+- Reply from the alert: new messages pop up a small alert by the clock with a reply box, Reply, Mark as Read and Open (while a game runs it's the usual tray balloon instead, so nothing covers the game). In a server channel the reply answers that message; in DMs and groups it's a normal message. If a reply can't be sent, Buzzcord says why and shows what you typed.
+- Unread Messages (Ctrl+Shift+U, or the tray menu): every unread chat on every account, with the messages themselves, Open, Mark as Read and Mark All as Read. It's the same list the tray and taskbar numbers add up. Message requests never count, and a DM nobody ever opened only counts while its last message is under 14 days old, so old untouched chats don't show as unread.
+- Auto-Away: after 10 minutes without using the PC, or as soon as Windows locks, Available accounts show as Away ("Away (idle)" under your name) and switch back when you return. Busy and Invisible are left alone, and your chosen status isn't changed. While away, Discord sends notifications to your phone. Options > Auto-Away sets the time (Off, 5, 10, 15, 30 minutes) and the lock rule.
+- Buddy list shortcut: Ctrl+Alt+B brings every buddy list to the front from any app. Options > Buddy list shortcut changes it or turns it off; if another app already uses the combination, Buzzcord says so.
 - Message archive: DM and group chat text is appended to `Chat log.txt` beside the auto-saved files.
 - Reactions: click a reaction to add or remove yours, or use "react" on a message for the smiley picker.
 - Help > Donate (PayPal) and About.

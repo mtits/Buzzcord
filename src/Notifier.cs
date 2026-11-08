@@ -52,6 +52,12 @@ namespace Buzzcord
         // caller already showed something (an open chat window, a pop-up).
         public static void Alert(BuddyListForm from, AlertKind kind, string title, string text, string channelId, string userId, bool balloon)
         {
+            Alert(from, kind, title, text, channelId, userId, balloon, null);
+        }
+
+        // messageId: for message alerts, which get the quick-reply pop-up instead of a balloon.
+        public static void Alert(BuddyListForm from, AlertKind kind, string title, string text, string channelId, string userId, bool balloon, string messageId)
+        {
             var s = from.Session;
             var d = DecideFor(s);
             Record(s, new AlertEntry { Time = DateTime.Now, Kind = kind, Title = title, Text = Shorten(text), ChannelId = channelId, UserId = userId });
@@ -60,7 +66,11 @@ namespace Buzzcord
                 if (kind == AlertKind.SignIn) Sounds.Door();
                 else Sounds.Ding();
             }
-            if (d.Balloon && balloon && App != null) App.Balloon(from, title, text, channelId, userId);
+            if (!d.Balloon || !balloon || App == null) return;
+            bool message = kind == AlertKind.Message || kind == AlertKind.Mention || kind == AlertKind.Followed;
+            // While a game runs, a window on top could interrupt it; the balloon is gentler there.
+            if (message && messageId != null && channelId != null && !Gaming) App.QuickReply(from, title, text, channelId, messageId);
+            else App.Balloon(from, title, text, channelId, userId);
         }
 
         static string Shorten(string text)

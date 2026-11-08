@@ -133,6 +133,7 @@ namespace Buzzcord
         bool hinted;
 
         public int WindowCount { get { return windows.Count; } }
+        public List<BuddyListForm> Windows { get { return windows; } }
 
         public AppContext(bool background) : this(background, false) { }
 
@@ -168,6 +169,10 @@ namespace Buzzcord
                     menu.Items.Add(name, Icons.Status(win.Session.Status, 16), (a, b) => ShowWindow(win));
                 }
                 menu.Items.Add(new ToolStripSeparator());
+                var hk = GlobalHotkey.Saved;
+                menu.Items.Add(new ToolStripMenuItem("Show buddy lists", null, (a, b) => ShowAll()) { ShortcutKeyDisplayString = hk != null ? hk.ToString() : null });
+                menu.Items.Add(new ToolStripMenuItem("Unread messages", null, (a, b) => UnreadForm.Open(this)) { ShortcutKeyDisplayString = "Ctrl+Shift+U" });
+                menu.Items.Add(new ToolStripSeparator());
                 menu.Items.Add("Add account...", null, (a, b) => AddAccount());
                 menu.Items.Add("Rich presence status", null, (a, b) => MessageBox.Show(RpcStatus(), "Buzzcord"));
                 menu.Items.Add(new ToolStripSeparator());
@@ -185,6 +190,11 @@ namespace Buzzcord
             rpc.Start();
             pipeTimer.Tick += (s, e) => EnsurePipe();
             pipeTimer.Start();
+
+            AutoAway.Start(() => windows.ConvertAll(w => w.Session));
+            GlobalHotkey.Instance = new GlobalHotkey(ShowAll);
+            if (!GlobalHotkey.Instance.Apply())
+                tray.ShowBalloonTip(6000, "Buddy list shortcut is off", GlobalHotkey.Instance.Problem, ToolTipIcon.Warning);
 
             Start(background);
         }
@@ -257,13 +267,16 @@ namespace Buzzcord
                 w.Close();
             }
             rpc.Stop();
+            AutoAway.Stop();
+            if (GlobalHotkey.Instance != null) GlobalHotkey.Instance.Dispose();
             tray.Visible = false;
             tray.Dispose();
             Settings.Save();
             ExitThread();
         }
 
-        void ShowAll()
+        // Every buddy list to the front: tray double-click and the global shortcut.
+        public void ShowAll()
         {
             foreach (var w in windows) ShowWindow(w);
         }
@@ -295,6 +308,12 @@ namespace Buzzcord
             balloonChannel = channelId;
             balloonUser = userId;
             tray.ShowBalloonTip(5000, prefix + title, text, ToolTipIcon.None);
+        }
+
+        public void QuickReply(BuddyListForm from, string title, string text, string channelId, string messageId)
+        {
+            string account = windows.Count > 1 && from.Session.Me != null ? from.Session.Me.DisplayName : null;
+            QuickReplyForm.Show(from, title, text, channelId, messageId, account);
         }
 
         void BalloonClicked()
