@@ -140,10 +140,7 @@ namespace Buzzcord
 
         // Only a real Buzzcord.exe replaces itself; a copy hosted by PowerShell (run.ps1, from
         // source) just hears that an update is out.
-        public static bool CanInstall
-        {
-            get { return string.Equals(Path.GetFileName(Application.ExecutablePath), "Buzzcord.exe", StringComparison.OrdinalIgnoreCase); }
-        }
+        public static bool CanInstall { get { return Shortcuts.RunningAsExe; } }
 
         // Copies the staged files over the ones in binDir. On failure everything is put back and the
         // exception is rethrown.

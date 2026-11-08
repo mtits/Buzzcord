@@ -50,6 +50,7 @@ namespace Buzzcord
             Check("Updates: versions, releases, unpacking", UpdateParseTest);
             Check("Updates: swapping files and rolling back", UpdateApplyTest);
             Check("Donate QR codes", DonateQrTest);
+            Check("Shortcut and startup command", LaunchCommandTest);
             Check("Voice: AES-GCM", GcmTest);
             Check("Voice: HKDF and MLS encoding", HkdfAndTlsTest);
             Check("Voice: P-256 keys, ECDH, ECDSA", P256Test);
@@ -528,6 +529,21 @@ namespace Buzzcord
             Assert(r != null, "the latest release couldn't be read");
             Assert(r.ZipUrl != null && r.ShaUrl != null, r.Tag + " has no Windows zip and checksum: updates would skip it");
             return r.Tag + (r.Version > Updater.Current ? " (newer than this build)" : " (not newer than this build)");
+        }
+
+        static string LaunchCommandTest()
+        {
+            string target, args;
+            // An unsigned release exe unzipped anywhere starts itself (there's no run.ps1 beside it).
+            Shortcuts.Command(true, true, false, @"D:\Apps\Buzzcord\Buzzcord.exe", @"D:\Apps\Buzzcord", out target, out args);
+            Assert(target == @"D:\Apps\Buzzcord\Buzzcord.exe" && args == "--background", "release exe: " + target + " " + args);
+            // From source through PowerShell, unsigned: back through run.ps1.
+            Shortcuts.Command(false, false, false, @"C:\src\bin\Buzzcord.exe", @"C:\src", out target, out args);
+            Assert(target.EndsWith("conhost.exe") && args.Contains(@"C:\src\run.ps1") && !args.Contains("--background"), "source copy: " + args);
+            // From source with a signed exe in bin\: the exe.
+            Shortcuts.Command(false, false, true, @"C:\src\bin\Buzzcord.exe", @"C:\src", out target, out args);
+            Assert(target == @"C:\src\bin\Buzzcord.exe" && args == "", "signed source copy: " + target);
+            return null;
         }
 
         static string DonateQrTest()

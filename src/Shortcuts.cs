@@ -49,6 +49,13 @@ namespace Buzzcord
 
         static string Exe { get { return Path.Combine(BinDir, "Buzzcord.exe"); } }
 
+        // Running as Buzzcord.exe itself (a release, signed or not), rather than hosted by
+        // PowerShell from the source folder through run.ps1.
+        public static bool RunningAsExe
+        {
+            get { return string.Equals(Path.GetFileName(Application.ExecutablePath), "Buzzcord.exe", StringComparison.OrdinalIgnoreCase); }
+        }
+
         // Once the exe is code-signed, Windows lets it run directly.
         public static bool ExeIsSigned
         {
@@ -62,14 +69,22 @@ namespace Buzzcord
         // Program and arguments that start Buzzcord the way that works on this PC.
         public static void Command(bool background, out string target, out string args)
         {
-            if (ExeIsSigned)
+            Command(background, RunningAsExe, ExeIsSigned, Exe, Home, out target, out args);
+        }
+
+        // A copy that runs as Buzzcord.exe starts the same way again: Windows already let this exe run.
+        // A copy hosted by PowerShell goes back through run.ps1 unless the exe in bin\ is signed
+        // (Smart App Control would block it unsigned).
+        public static void Command(bool background, bool asExe, bool signed, string exe, string home, out string target, out string args)
+        {
+            if (asExe || signed)
             {
-                target = Exe;
+                target = exe;
                 args = background ? "--background" : "";
                 return;
             }
             target = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "conhost.exe");
-            args = "--headless powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File \"" + Path.Combine(Home, "run.ps1") + "\"" + (background ? " --background" : "");
+            args = "--headless powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File \"" + Path.Combine(home, "run.ps1") + "\"" + (background ? " --background" : "");
         }
 
         public static string CommandLine(bool background)
@@ -93,7 +108,9 @@ namespace Buzzcord
         // or the exe gets signed); the desktop one only the first time, so deleting it sticks.
         public static void Ensure()
         {
-            if (!File.Exists(Path.Combine(Home, "run.ps1")) && !ExeIsSigned) return;
+            if (!RunningAsExe && !File.Exists(Path.Combine(Home, "run.ps1")) && !ExeIsSigned) return;
+            // A test copy with its own data folder must not repoint the real shortcuts at itself.
+            if (Environment.GetEnvironmentVariable("BUZZCORD_DATA") != null) return;
             try
             {
                 Create(StartMenuPath);
