@@ -192,7 +192,7 @@ namespace Buzzcord
         public Presence PresenceOf(string userId)
         {
             Presence p;
-            if (Me != null && userId == Me.Id) return new Presence { Status = Status == "invisible" ? "offline" : Status, Activities = PresenceManager.Instance.ActivitiesFor(this) };
+            if (Me != null && userId == Me.Id) return new Presence { Status = Status == "invisible" ? "offline" : ShownStatus, Activities = PresenceManager.Instance.ActivitiesFor(this) };
             return Presences.TryGetValue(userId, out p) ? p : new Presence();
         }
 
@@ -228,10 +228,47 @@ namespace Buzzcord
 
         public bool IsUnread(Channel c)
         {
-            if (c == null || c.LastMessageId == null || IsMuted(c)) return false;
+            if (c == null || c.LastMessageId == null || IsMuted(c) || c.IsRequest) return false;
             string read;
-            if (!ReadStates.TryGetValue(c.Id, out read)) return c.IsPrivate; // never-read DMs count as unread
+            if (!ReadStates.TryGetValue(c.Id, out read)) return NeverOpenedCounts(c, c.LastMessageId, DateTime.Now);
             return Snowflake.Compare(c.LastMessageId, read) > 0;
+        }
+
+        // Discord keeps no read marker for a chat that was never opened anywhere. Such a DM only
+        // counts as unread while its last message is recent: old ones nobody opened stay quiet.
+        public static readonly TimeSpan NeverOpenedWindow = TimeSpan.FromDays(14);
+
+        public static bool NeverOpenedCounts(Channel c, string last, DateTime now)
+        {
+            return c.IsPrivate && now - Snowflake.Time(last) < NeverOpenedWindow;
+        }
+
+        // Everything in the unread count, one entry per chat (newest first): unread DMs and
+        // groups (their mentions, or 1), and mentions in server channels and threads. The tray
+        // and taskbar numbers and the Unread Messages window all come from this list.
+        public List<KeyValuePair<string, int>> UnreadEntries()
+        {
+            var list = new List<KeyValuePair<string, int>>();
+            if (!IsReady) return list;
+            foreach (var c in PrivateChannels.Values)
+                if (IsUnread(c)) list.Add(new KeyValuePair<string, int>(c.Id, Math.Max(1, MentionCount(c.Id))));
+            foreach (var kv in Mentions)
+                if (!PrivateChannels.ContainsKey(kv.Key) && kv.Value > 0) list.Add(kv);
+            list.Sort((a, b) =>
+            {
+                var ca = FindChannel(a.Key);
+                var cb = FindChannel(b.Key);
+                return Snowflake.Compare(cb != null && cb.LastMessageId != null ? cb.LastMessageId : b.Key,
+                    ca != null && ca.LastMessageId != null ? ca.LastMessageId : a.Key);
+            });
+            return list;
+        }
+
+        public int BadgeCount()
+        {
+            int n = 0;
+            foreach (var kv in UnreadEntries()) n += kv.Value;
+            return n;
         }
 
         public int MentionCount(string channelId)
@@ -266,6 +303,47 @@ namespace Buzzcord
             Api.Post("/channels/" + c.Id + "/messages/" + id + "/ack", Json.O("token", null)).ContinueWith(t => { var ignored = t.Exception; });
         }
 
+        // For a chat Buzzcord has no Channel for (a thread with a mention).
+        public void MarkRead(string channelId, string upTo)
+        {
+            var c = FindChannel(channelId);
+            if (c != null)
+            {
+                if (c.LastMessageId == null) c.LastMessageId = upTo;
+                MarkRead(c);
+                return;
+            }
+            ReadStates[channelId] = upTo;
+            Mentions.Remove(channelId);
+            if (ListChanged != null) ListChanged();
+            Api.Post("/channels/" + channelId + "/messages/" + upTo + "/ack", Json.O("token", null)).ContinueWith(t => { var ignored = t.Exception; });
+        }
+
+        // A reply typed into a message alert: in a server channel it answers that message, in DMs
+        // and groups it's a plain message. Null means no message_reference.
+        public static string ReplyTargetFor(Channel c, string messageId)
+        {
+            return c == null || c.IsPrivate || string.IsNullOrEmpty(messageId) ? null : messageId;
+        }
+
+        // ---- Auto-Away ----
+
+        public bool AutoAwayOn { get; private set; }
+        long awaySince;
+
+        // What friends see: Away while Auto-Away is on, unless you picked Busy or Invisible.
+        // Your chosen Status itself never changes.
+        public string ShownStatus { get { return AutoAwayOn && Status == "online" ? "idle" : Status; } }
+
+        public void SetAutoAway(bool on)
+        {
+            if (on == AutoAwayOn) return;
+            AutoAwayOn = on;
+            awaySince = on ? PresenceManager.NowMs() : 0;
+            if (Status == "online") PushPresence();
+            else if (Me != null && PresenceChanged != null) PresenceChanged(Me.Id);
+        }
+
         public void SetStatus(string status)
         {
             Status = status;
@@ -289,13 +367,14 @@ namespace Buzzcord
             Gateway.UpdatePresence(p);
         }
 
-        JObj BuildPresence()
+        public JObj BuildPresence()
         {
             var acts = new List<object>();
             if (!string.IsNullOrEmpty(CustomStatusText))
                 acts.Add(Json.O("name", "Custom Status", "type", 4, "state", CustomStatusText));
             foreach (var a in PresenceManager.Instance.ActivitiesFor(this)) acts.Add(a);
-            return Json.O("status", Status, "since", 0, "activities", acts, "afk", false);
+            // afk tells Discord to send notifications to your phone while you're away from the PC.
+            return Json.O("status", ShownStatus, "since", AutoAwayOn ? awaySince : 0L, "activities", acts, "afk", AutoAwayOn);
         }
 
         // True when Discord has had time to apply our game but its view of us still has none:

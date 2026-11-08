@@ -41,6 +41,10 @@ namespace Buzzcord
             Check("Message archive", ArchiveTest);
             Check("Unfriend detection", UnfriendTest);
             Check("Group order", GroupOrderTest);
+            Check("Auto-Away rules", AutoAwayTest);
+            Check("Unread: never-opened DMs and message requests", UnreadRulesTest);
+            Check("Notification reply targeting", ReplyTargetTest);
+            Check("Buddy list shortcut parsing", HotkeyParseTest);
             Check("Server member list", MemberListTest);
             Check("Voice: AES-GCM", GcmTest);
             Check("Voice: HKDF and MLS encoding", HkdfAndTlsTest);
@@ -478,6 +482,106 @@ namespace Buzzcord
             return order;
         }
 
+        // Mirrors mac/Tests/AutoAwayTests.swift.
+        static string AutoAwayTest()
+        {
+            Assert(!AutoAway.ShouldBeAway(30, false, 10, true), "30 s idle isn't away");
+            Assert(AutoAway.ShouldBeAway(600, false, 10, true), "10 minutes idle is away");
+            Assert(!AutoAway.ShouldBeAway(6000, false, 0, true), "Off means never by idle time");
+            Assert(AutoAway.ShouldBeAway(0, true, 0, true), "locking Windows");
+            Assert(!AutoAway.ShouldBeAway(0, true, 10, false), "locking doesn't count when turned off");
+            double idle = AutoAway.IdleSeconds;
+            Assert(idle >= 0, "reads the idle time");
+
+            var s = FakeSession();
+            s.Status = "online";
+            s.SetAutoAway(true);
+            Assert(s.ShownStatus == "idle", "Available shows as Away");
+            var p = s.BuildPresence();
+            Assert(p.Str("status") == "idle" && p.Bool("afk") && p.Long("since") > 0, "presence: " + Json.Write(p));
+            Assert(s.Status == "online", "the saved status isn't changed");
+            s.Status = "dnd";
+            Assert(s.ShownStatus == "dnd", "Busy stays Busy");
+            s.Status = "invisible";
+            Assert(s.ShownStatus == "invisible", "Invisible stays invisible");
+            s.Status = "online";
+            s.SetAutoAway(false);
+            p = s.BuildPresence();
+            Assert(s.ShownStatus == "online" && !p.Bool("afk") && p.Long("since") == 0, "back again: " + Json.Write(p));
+            return "idle now " + (int)idle + " s";
+        }
+
+        static string SnowflakeDaysAgo(double days)
+        {
+            long ms = (long)(DateTime.UtcNow.AddDays(-days) - new DateTime(1970, 1, 1)).TotalMilliseconds;
+            return ((ms - 1420070400000L) << 22).ToString();
+        }
+
+        // Mirrors mac/Tests/UnreadTests.swift.
+        static string UnreadRulesTest()
+        {
+            string old = SnowflakeDaysAgo(200), recent = SnowflakeDaysAgo(1), older = SnowflakeDaysAgo(2);
+            var s = new Session("MTIzNDU2Nzg5.unread.test");
+            s.Inject("READY", Json.O(
+                "session_id", "x",
+                "user", Json.O("id", "1", "username", "me"),
+                "users", new List<object> { Json.O("id", "2", "username", "a"), Json.O("id", "3", "username", "b") },
+                "private_channels", new List<object> {
+                    Json.O("id", "10", "type", 1L, "recipient_ids", new List<object> { "2" }, "last_message_id", old),      // never opened, months old
+                    Json.O("id", "11", "type", 1L, "recipient_ids", new List<object> { "3" }, "last_message_id", recent),   // never opened, yesterday
+                    Json.O("id", "12", "type", 1L, "recipient_ids", new List<object> { "2" }, "last_message_id", recent),   // read up to an older message
+                    Json.O("id", "13", "type", 1L, "recipient_ids", new List<object> { "3" }, "last_message_id", recent, "is_message_request", true),
+                    Json.O("id", "14", "type", 3L, "recipient_ids", new List<object> { "2", "3" }, "last_message_id", old) },  // read, nothing new
+                "guilds", new List<object> { Json.O("id", "20", "properties", Json.O("name", "G", "owner_id", "9"),
+                    "roles", new List<object> { Json.O("id", "20", "permissions", "1071698660929", "position", 0L) },
+                    "channels", new List<object> { Json.O("id", "21", "type", 0L, "name", "general", "position", 0L, "last_message_id", recent) }) },
+                "read_state", Json.O("entries", new List<object> {
+                    Json.O("id", "12", "last_message_id", older),
+                    Json.O("id", "14", "last_message_id", old),
+                    Json.O("id", "21", "last_message_id", older, "mention_count", 2L),
+                    Json.O("id", "99", "last_message_id", older, "mention_count", 1L) })));   // a thread Buzzcord hasn't loaded
+            Assert(!s.IsUnread(s.FindChannel("10")), "months-old DM nobody opened stays quiet");
+            Assert(s.IsUnread(s.FindChannel("11")), "a new DM nobody opened yet counts");
+            Assert(s.IsUnread(s.FindChannel("12")), "DM with newer messages counts");
+            Assert(!s.IsUnread(s.FindChannel("13")), "message requests don't count");
+            Assert(!s.IsUnread(s.FindChannel("14")), "read group");
+            var entries = new List<string>();
+            foreach (var e in s.UnreadEntries()) entries.Add(e.Key + "=" + e.Value);
+            entries.Sort(StringComparer.Ordinal);
+            Assert(string.Join(",", entries) == "11=1,12=1,21=2,99=1", "entries: " + string.Join(",", entries));
+            Assert(s.BadgeCount() == 5, "the tray number is the Unread window's rows added up, got " + s.BadgeCount());
+            s.MarkRead("99", recent);
+            Assert(s.BadgeCount() == 4, "marking a thread read clears it");
+            Assert(Session.NeverOpenedCounts(s.FindChannel("11"), SnowflakeDaysAgo(13.9), DateTime.Now), "13.9 days old counts");
+            Assert(!Session.NeverOpenedCounts(s.FindChannel("11"), SnowflakeDaysAgo(14.1), DateTime.Now), "14.1 days old doesn't");
+            return null;
+        }
+
+        static string ReplyTargetTest()
+        {
+            var s = FakeSession();
+            Assert(Session.ReplyTargetFor(s.FindChannel("911"), "777") == "777", "server channel replies reference the message");
+            Assert(Session.ReplyTargetFor(s.FindChannel("500"), "777") == null, "DM replies are plain messages");
+            Assert(Session.ReplyTargetFor(s.FindChannel("501"), "777") == null, "group replies are plain messages");
+            Assert(Session.ReplyTargetFor(s.FindChannel("911"), null) == null, "no message id, no reference");
+            return null;
+        }
+
+        // Mirrors the shortcut half of mac/Tests/DeviceAndShortcutTests.swift.
+        static string HotkeyParseTest()
+        {
+            Assert(HotkeyCombo.Standard.ToString() == "Ctrl+Alt+B", "default is Ctrl+Alt+B");
+            var c = HotkeyCombo.Parse("ctrl + alt + f5");
+            Assert(c != null && c.Modifiers == (HotkeyCombo.ModControl | HotkeyCombo.ModAlt) && c.Key == System.Windows.Forms.Keys.F5, "lenient parsing");
+            Assert(HotkeyCombo.Parse("Win+Shift+Alt+Ctrl+9").ToString() == "Ctrl+Alt+Shift+Win+9", "modifiers in Windows' order");
+            Assert(HotkeyCombo.Parse(HotkeyCombo.Standard.ToString()).ToString() == "Ctrl+Alt+B", "round trip");
+            Assert(HotkeyCombo.Parse("") == null && HotkeyCombo.Parse("Ctrl+") == null && HotkeyCombo.Parse("Ctrl+A+B") == null && HotkeyCombo.Parse("Ctrl+Bogus") == null && HotkeyCombo.Parse("Ctrl+65") == null, "rejects junk");
+            Assert(!HotkeyCombo.Parse("Shift+B").IsUsable, "Shift alone would steal typing");
+            Assert(!HotkeyCombo.Usable(0), "no modifiers");
+            Assert(HotkeyCombo.Usable(HotkeyCombo.ModControl) && HotkeyCombo.Parse("Win+B").IsUsable, "Ctrl or Win is enough");
+            return null;
+        }
+
         static JObj MemberItem(string id, string status, string game, string nick, params string[] roles)
         {
             var acts = new List<object>();
@@ -645,6 +749,25 @@ namespace Buzzcord
             Pump(4000);
             Capture(login, Path.Combine(dir, "login.png"));
             login.Close();
+
+            // Auto-Away under your name, the quick-reply alert and the Unread Messages window.
+            app.Windows.Add(list);
+            s.SetAutoAway(true);
+            list.Invalidate(true);
+            Pump(500);
+            Capture(list, Path.Combine(dir, "buddylist-away.png"));
+            s.SetAutoAway(false);
+            QuickReplyForm.Show(list, "Alyssa", "are you on later? we're 2 games from Immortal", "500", "1300000000000000002", null);
+            Pump(800);
+            foreach (Form f in Application.OpenForms) if (f is QuickReplyForm) { Capture(f, Path.Combine(dir, "quick-reply.png")); f.Close(); break; }
+            s.PrivateChannels["500"].LastMessageId = SnowflakeDaysAgo(0.01);
+            s.ReadStates["500"] = SnowflakeDaysAgo(0.5);
+            s.Mentions["911"] = 2;
+            s.Mentions["123456789012345678"] = 1;   // a thread Buzzcord hasn't loaded
+            UnreadForm.Open(app);
+            Pump(3000);
+            foreach (Form f in Application.OpenForms) if (f is UnreadForm) { Capture(f, Path.Combine(dir, "unread.png")); f.Close(); break; }
+            app.Windows.Remove(list);
             chat.Close();
             list.Exiting = true;
             list.Close();

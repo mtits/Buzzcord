@@ -290,6 +290,7 @@ namespace Buzzcord
             messenger.DropDownItems.Add(new ToolStripMenuItem("Add a &Friend...", AddIcon(), (s, e) => AddFriend(null)) { ShortcutKeys = Keys.Control | Keys.N });
             messenger.DropDownItems.Add(new ToolStripMenuItem("&Search", null, (s, e) => { search.Focus(); search.SelectAll(); }) { ShortcutKeys = Keys.Control | Keys.F });
             messenger.DropDownItems.Add(new ToolStripMenuItem("&Mentions && notifications", null, (s, e) => ShowAlerts()) { ShortcutKeys = Keys.Control | Keys.M });
+            messenger.DropDownItems.Add(new ToolStripMenuItem("&Unread messages", null, (s, e) => UnreadForm.Open(app)) { ShortcutKeys = Keys.Control | Keys.Shift | Keys.U });
             messenger.DropDownItems.Add(new ToolStripSeparator());
             messenger.DropDownItems.Add("&Add account...", null, (s, e) => app.AddAccount());
             messenger.DropDownItems.Add("Open &saved files", null, (s, e) => OpenFolder(System.IO.Path.Combine(Settings.SaveFolder, AutoSaver.Clean(Session.Me != null ? Session.Me.Username : ""))));
@@ -336,6 +337,8 @@ namespace Buzzcord
             options.DropDownItems.Add(theme);
             options.DropDownItems.Add("&Arrange groups...", null, (s, e) => ArrangeGroupsForm.Open(this));
             options.DropDownItems.Add("&Voice settings...", null, (s, e) => { using (var f = new VoiceSettingsForm()) f.ShowDialog(this); });
+            options.DropDownItems.Add(AutoAwayMenu());
+            options.DropDownItems.Add("Buddy list &shortcut...", null, (s, e) => { using (var f = new HotkeyForm()) f.ShowDialog(this); });
             options.DropDownItems.Add(new ToolStripSeparator());
             options.DropDownItems.Add(Toggle("Pop up a window for new messages", "PopupNew", true));
             options.DropDownItems.Add(Toggle("Quiet while gaming (no pop-ups or sounds)", "QuietWhileGaming", true));
@@ -364,6 +367,28 @@ namespace Buzzcord
 
             menu.Items.AddRange(new ToolStripItem[] { messenger, status, options, help });
             MainMenuStrip = menu;
+        }
+
+        // Options > Auto-Away: Off, 5, 10, 15 or 30 idle minutes, and whether locking Windows counts.
+        static ToolStripMenuItem AutoAwayMenu()
+        {
+            var menu = new ToolStripMenuItem("Auto-&Away");
+            foreach (int m in AutoAway.Choices)
+            {
+                int value = m;
+                menu.DropDownItems.Add(new ToolStripMenuItem(m == 0 ? "Off" : "After " + m + " minutes idle", null, (s, e) => AutoAway.Minutes = value));
+            }
+            menu.DropDownItems.Add(new ToolStripSeparator());
+            var locked = new ToolStripMenuItem("Away when Windows is locked");
+            locked.Click += (s, e) => AutoAway.WhenLocked = !AutoAway.WhenLocked;
+            menu.DropDownItems.Add(locked);
+            menu.DropDownOpening += (s, e) =>
+            {
+                for (int i = 0; i < AutoAway.Choices.Length; i++)
+                    ((ToolStripMenuItem)menu.DropDownItems[i]).Checked = AutoAway.Choices[i] == AutoAway.Minutes;
+                locked.Checked = AutoAway.WhenLocked;
+            };
+            return menu;
         }
 
         ToolStripMenuItem Toggle(string text, string key, bool def, Action<bool> changed = null)
@@ -420,8 +445,10 @@ namespace Buzzcord
             using (var bold = new Font("Arial", 10f, FontStyle.Bold))
                 using (var br = new SolidBrush(Theme.Text)) g.DrawString(me != null ? me.DisplayName : "Signing in...", bold, br, x, 7);
 
-            g.DrawImage(Icons.Status(Session.Status, 14), x, 27, 14, 14);
-            string label = Icons.StatusLabel(Session.Status) + " ▾";
+            // Auto-Away shows here without changing the status you picked.
+            bool away = Session.AutoAwayOn && Session.Status == "online";
+            g.DrawImage(Icons.Status(Session.ShownStatus, 14), x, 27, 14, 14);
+            string label = (away ? "Away (idle)" : Icons.StatusLabel(Session.Status)) + " ▾";
             using (var link = new Font("Tahoma", 8.25f, FontStyle.Underline))
             {
                 var sz = g.MeasureString(label, link);
@@ -1210,7 +1237,7 @@ namespace Buzzcord
                 OpenChat(c, false);   // the classic pop-up IM window, without stealing focus
                 Notifier.Alert(this, kind, title, text, cid, null, false);
             }
-            else Notifier.Alert(this, kind, title, text, cid, null, true);
+            else Notifier.Alert(this, kind, title, text, cid, null, true, m.Str("id"));
         }
 
         public void OpenChatById(string channelId)
@@ -1220,18 +1247,11 @@ namespace Buzzcord
             if (c != null) OpenChat(c, true);
         }
 
-        // Unread DMs/groups plus mentions, for the tray and taskbar badges.
+        // Unread DMs/groups plus mentions, for the tray and taskbar badges: the rows of the
+        // Unread Messages window added up.
         public int UnreadCount()
         {
-            if (!Session.IsReady) return 0;
-            int n = 0;
-            foreach (var c in Session.PrivateChannels.Values) if (Session.IsUnread(c)) n++;
-            foreach (var kv in Session.Mentions)
-            {
-                var c = Session.FindChannel(kv.Key);
-                if (c != null && !c.IsPrivate) n += kv.Value;
-            }
-            return n;
+            return Session.BadgeCount();
         }
 
         int badgeShown = -1;
