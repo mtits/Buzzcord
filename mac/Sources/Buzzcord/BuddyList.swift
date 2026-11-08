@@ -354,6 +354,27 @@ extension BuddyHeader {
     }
 }
 
+// One click selects a row, two open it. A row with buttons (friend requests) must not have this
+// on the whole row: the row's tap gestures take the click and the buttons never fire.
+struct RowClicks: ViewModifier {
+    let enabled: Bool
+    let single: () -> Void
+    let double: () -> Void
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.gesture(TapGesture(count: 2).onEnded { double() }.exclusively(before: TapGesture().onEnded { single() }))
+        } else {
+            content
+        }
+    }
+}
+
+extension BuddyRow {
+    // Rows whose own buttons must get their clicks.
+    var hasButtons: Bool { if case .pending = kind { return true } else { return false } }
+}
+
 struct RowView: View {
     let row: BuddyRow
     let session: Session
@@ -365,11 +386,22 @@ struct RowView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(list.selected == row.id ? Theme.selected : Color.clear)
             .contentShape(Rectangle())
-            .gesture(TapGesture(count: 2).onEnded { activate() }.exclusively(before: TapGesture().onEnded { tap() }))
+            .modifier(RowClicks(enabled: !row.hasButtons, single: tap, double: activate))
             .contextMenu { menu }
     }
 
     private var account: AccountController? { list.account }
+
+    // Friend request buttons: logged, and a failure says why instead of doing nothing.
+    static func friendAction(_ session: Session, _ what: String, _ id: String, _ op: @escaping () async throws -> Void) {
+        Log.write("friend: \(what) \(id)")
+        Task { @MainActor in
+            do { try await op() } catch {
+                Log.write("friend: \(what) \(id) failed: \(error.localizedDescription)")
+                showError("Couldn't \(what) the friend request from \(session.name(id)): \(error.localizedDescription)")
+            }
+        }
+    }
 
     private func tap() {
         switch row.kind {
@@ -416,8 +448,8 @@ struct RowView: View {
         case .guild(let g, _):
             Button("Mark Server as Read") { for c in g.channels.values where session.isUnread(c) { session.markRead(c) } }
         case .pending(let id, let incoming):
-            if incoming { Button("Accept") { Task { try? await session.addOrAcceptFriend(id, location: "Friends") } } }
-            Button(incoming ? "Ignore" : "Cancel Request") { Task { try? await session.removeRelationship(id, location: "Friends") } }
+            if incoming { Button("Accept") { RowView.friendAction(session, "accept", id) { try await session.addOrAcceptFriend(id, location: "Friends") } } }
+            Button(incoming ? "Ignore" : "Cancel Request") { RowView.friendAction(session, incoming ? "ignore" : "cancel", id) { try await session.removeRelationship(id, location: "Friends") } }
             Button("View Profile") { account?.showProfile(id, guildId: nil) }
         case .voiceUser(let id):
             Button("View Profile") { account?.showProfile(id, guildId: nil) }
@@ -509,17 +541,22 @@ struct RowView: View {
             .padding(.horizontal, 8).padding(.vertical, 1)
         case .pending(let id, let incoming):
             HStack(spacing: 6) {
-                RemoteImage(url: session.user(id).avatarUrl(64), corner: 3).frame(width: 26, height: 26)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(session.name(id)).font(.system(size: 12, weight: .semibold)).lineLimit(1)
-                    Text(incoming ? "wants to be your friend" : "request sent").font(.system(size: 10)).foregroundStyle(Theme.sub)
+                // Clicks on the picture and name select / open the chat; the buttons get their own.
+                HStack(spacing: 6) {
+                    RemoteImage(url: session.user(id).avatarUrl(64), corner: 3).frame(width: 26, height: 26)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(session.name(id)).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                        Text(incoming ? "wants to be your friend" : "request sent").font(.system(size: 10)).foregroundStyle(Theme.sub)
+                    }
+                    Spacer(minLength: 0)
                 }
-                Spacer(minLength: 0)
+                .contentShape(Rectangle())
+                .modifier(RowClicks(enabled: true, single: tap, double: activate))
                 if incoming {
-                    Button("Accept") { Task { try? await session.addOrAcceptFriend(id, location: "Friends") } }
-                    Button("Ignore") { Task { try? await session.removeRelationship(id, location: "Friends") } }
+                    Button("Accept") { RowView.friendAction(session, "accept", id) { try await session.addOrAcceptFriend(id, location: "Friends") } }
+                    Button("Ignore") { RowView.friendAction(session, "ignore", id) { try await session.removeRelationship(id, location: "Friends") } }
                 } else {
-                    Button("Cancel") { Task { try? await session.removeRelationship(id, location: "Friends") } }
+                    Button("Cancel") { RowView.friendAction(session, "cancel", id) { try await session.removeRelationship(id, location: "Friends") } }
                 }
             }
             .controlSize(.small)

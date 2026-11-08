@@ -89,6 +89,7 @@ enum Demo {
         }
         if CommandLine.arguments.contains("--shots") { screenshotLook(s, [alyssa, me, ben, dina, xenia, carlo]) }
         if CommandLine.arguments.contains("--about") { app.about(nil) }
+        if CommandLine.arguments.contains("--unread") { DispatchQueue.main.asyncAfter(deadline: .now() + 1) { UnreadWindowController.show(app) } }
         if let i = CommandLine.arguments.firstIndex(of: "--donate") {
             if i + 1 < CommandLine.arguments.count { DonateView.demoShown = DonateQR(rawValue: CommandLine.arguments[i + 1]) }
             DonateWindowController.show()
