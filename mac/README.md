@@ -1,0 +1,55 @@
+# Buzzcord for macOS
+
+A native port of Buzzcord (Swift, AppKit + SwiftUI, no Electron) for Macs with macOS 14 or later, Apple Silicon or Intel.
+It follows the Windows version in `../src`: the same Discord protocol code, QR login, buddy list groups and chat HTML.
+
+## Build and run
+
+```
+./build.sh --install
+```
+
+This builds `build/Buzzcord.app`, signs it with your Apple Development certificate (ad hoc if there's none), and copies it to `~/Applications`. Swift and Xcode's command-line tools are the only requirements.
+
+Hidden checks: `Buzzcord.app/Contents/MacOS/Buzzcord --demo` opens the windows with made-up data, and `--gateway-test` confirms that Discord's rejection of a fake token (close code 4004) is detected.
+
+## What's in it
+
+- Sign in by QR code or by pasting a token. Several accounts at once, one buddy list each. Tokens are kept in the login keychain (item "Buzzcord").
+- Buddy list: Favorites, Recent chats, Group chats, Friends (online first, with games and custom status), Offline friends, Servers (channels by category, voice channels with who's in them) and Friend requests (Accept, Ignore, Cancel). Search box (Cmd+F), Add a Friend (Cmd+N), status and status message.
+- IM windows: history with pictures, GIFs, videos, embeds, replies, reactions (click to toggle; "react" for the picker), edit (Up arrow), delete, typing indicator, formatting buttons, smileys and server emoji, Send File, drag and drop, pasting screenshots, and BUZZ! (Cmd+G). A DM window shows their picture and what they're playing.
+- Notifications: banners and sounds for DMs, mentions and followed channels ("Notify me about every message"), friend requests and friend sign-ins. Discord's mutes are respected, and Busy silences pop-ups and sounds. New DMs pop up their IM window without taking focus (Options menu to turn off). The Dock icon shows the unread count. Message banners have Reply (type your answer right in the banner; in a server channel it's sent as a reply to that message) and Mark as Read.
+- Auto-Away: after 10 minutes without using the Mac, or as soon as the screen locks, Available accounts show as Away ("Away (idle)" under your name) and switch back when you return. Busy and Invisible are left alone, and your chosen status isn't changed. While away, Discord sends notifications to your phone. Options > Auto-Away sets the time (Off, 5, 10, 15, 30 minutes) and the screen-lock rule.
+- Profiles (click a name or picture), captchas (hCaptcha in a small window), and Open at Login (Options menu).
+- Full-size pictures: click someone's picture (or banner) on their profile to see it at the size they uploaded it, animated if it is. Fit, Actual Size, pinch or Cmd+/- to zoom, and Download (Cmd+S) saves the original file. Right-click a profile picture, or the big picture in a DM window, for View Full Size and Download Full Size; on a server profile also their server picture.
+- Help menu: Rich Presence Status, Open Log Folder (`buzzcord.log`), Show Crash Reports (the newest of macOS's reports for Buzzcord in `~/Library/Logs/DiagnosticReports`), and Donate (PayPal), which is also in the Buzzcord menu and the About box.
+- Unread Messages (Shift+Cmd+U, or from the menu bar icon's menu): everything behind the unread count on every account, one row per chat with the unread messages themselves (in a server channel, the ones that mention you), when the last one came, and Open / Mark as Read, plus Mark All as Read. It's the same list the menu bar and Dock numbers add up, so they always agree.
+- What counts as unread: a DM or group with messages after where you last read (in any Discord app), and mentions in server channels and threads. A DM nobody ever opened only counts while its last message is under 14 days old, and message requests and DMs Discord filtered as spam never count, so old chats you never touched don't show a red (1).
+- Menu bar icon: double-click it to bring every account's buddy list to the front; click once for a menu of accounts (with status and unread count), Mentions & Notifications, Add Account and Quit. It shows the unread count too. Options > Show Icon in Menu Bar turns it off.
+- Menu Bar Only: Options > Menu Bar Only (Hide Dock Icon) takes Buzzcord out of the Dock and the Cmd+Tab switcher. Windows still come forward from the menu bar icon or the shortcut, and the icon's menu gains Options, Help and About (the app's own menu bar only shows while one of its windows is in front).
+- Buddy list shortcut: Option+Command+B brings every buddy list to the front from any app, like double-clicking the menu bar icon. Options > Buddy List Shortcut changes it (press the new keys; it needs Command, Option or Control) or turns it off. No Accessibility permission is needed.
+- Files sent in DMs and group chats are saved to `Documents/Buzzcord Saved/<account>/<chat>`, and their text goes into `Chat log.txt` there (Options menu to turn either off or change the folder; Conversation > Open Saved Files).
+- Member sidebar in server channels (Discord's member list: role groups, role colours, what people are playing) and group chats. Conversation > Show Members hides it.
+- Message search (Cmd+F in a chat window, or Conversation > Search Messages) uses Discord's own search, so it finds old messages; "Whole server" searches every channel.
+- Mentions & notifications (Shift+Cmd+M, or Mentions in the buddy list): Discord's mentions inbox, and a saved history of every alert Buzzcord showed.
+- Voice calls (no video):
+  - **Server voice channels:** double-click one in the buddy list to join.
+  - **DMs and group chats:** the Call button (Shift+Cmd+K) rings them. Incoming calls show a ringing window with Answer and Ignore.
+  - **The voice bar** under the buddy list shows who's there (green ring = talking), with Mute, Deafen and Leave. Right-click someone to change their volume.
+  - **Options > Voice Settings (Cmd+,):** voice activity with a live mic meter, or push-to-talk on Option, Control, Fn or Shift; mic volume; join muted; and the **Microphone** and **Speakers** for calls, separate from System Settings > Sound (which the rest of the Mac keeps using). The choice is remembered; if that device is unplugged or switched off, calls use the system default, and plugging things in or out mid-call switches over by itself. Hover over the voice bar's status line to see which devices the call is on.
+  - **Encryption:** calls use Discord's DAVE end-to-end encryption (MLS), ported from the Windows version and checked against the MLS test vectors (`swift test`). The lock on the voice bar shows the voice privacy code.
+  - **Audio:** Opus comes from macOS itself (AudioToolbox). The mic and speakers run on Core Audio I/O units: first macOS voice processing on the chosen pair (echo cancellation and noise suppression, which works even with a separate USB mic and DAC), and only if no sound moves, one unit each without echo cancellation (the voice bar then says to use headphones).
+  - **One call at a time** across all accounts.
+
+- Game lists on profiles (Discord's "Board"): Favorite, Games in Rotation, Games I Like and Want to Play show on everyone's profile. On your own (click your picture, or Messenger > My Profile and Games) each list has "+ add", which searches Discord's list of about 25,000 games; right-click a game to remove it or copy it to another list. Right-click a friend's game on their profile, or what they're playing, to add it to yours.
+- Playing status: Options > Show What I'm Playing (off until you turn it on) tells friends what you're playing, on every account. It covers two things:
+  - **Rich presence:** games that report details to Discord (rank, map, party size, time played) report them to Buzzcord instead, over the same local socket Discord's Mac app uses (`$TMPDIR/discord-ipc-0`). If the Discord app is running it keeps that socket and Buzzcord takes the next free one, moving to `discord-ipc-0` within a minute of Discord quitting.
+  - **Running games:** Discord's Mac games, apps filed under Games, and anything installed by Steam.
+
+  The game shows under your name (hover for the details); click it to add it to your profile or stop sharing it ("Don't Share"). Options > Share Game Activity on This Account turns it off for one account, and Share Hidden Games Again undoes every "Don't Share".
+
+Closing a buddy list only hides it. Click the Dock icon or use Messenger > Buddy Lists to get it back.
+
+Hidden checks: `--voice-test` runs the offline call plumbing checks (RTP encryption, Opus, jitter buffer, voice activity), `--audio-test` opens the real mic and speakers for 3 seconds, `--audio-probe` tries several mic and speaker pairs and logs what each ended up using, and `--games-test` downloads Discord's game list and lists games running now. `--demo --profile` also opens a profile with game lists, and `--demo --playing` listens for rich presence without changing your settings, `--demo --picture <url>` opens the picture viewer, `--demo --away` shows the Auto-Away state, and `--demo --menubar-only` runs without a Dock icon. Run these with `open -n build/Buzzcord.app --args ...` when they need the mic, so macOS uses Buzzcord's own permission.
+
+Not in the Mac version yet: video and screen share.
