@@ -27,6 +27,8 @@ missing here. Fill in the "Windows since 2026-11-02" list and the Mac side gets 
 - **Unread Messages window** with message previews, Open, Mark as Read and Mark All as Read; it lists exactly what the unread count counts. Mac: Shift+Command+U or the menu bar icon (`Unread.swift`). Windows: Ctrl+Shift+U (Messenger menu) or the tray menu (`UnreadForm.cs`, `Session.UnreadEntries`, which the tray and taskbar numbers now add up).
 - **The red (1) fix:** message requests (and DMs Discord filtered as spam) never count as unread, and a DM with no read marker from Discord (never opened anywhere) only counts while its last message is under 14 days old. Mac: `Session.isUnread`, `neverOpenedCounts`. Windows: `Session.IsUnread`, `Session.NeverOpenedCounts`, `Channel.IsRequest`.
 
+- **Launch safety (2026-11-08):** the one-time notice before the first sign-in (Windows `NoticeForm.cs`, Mac `Notice.swift`, same wording), the token box warning, and the About box (not affiliated with Discord Inc. or Yahoo, MIT License, site and source links). Difference: Windows ticks Start with Windows in the notice by default; the Mac's Open at Login box starts unticked.
+
 ## Mac only (candidates to bring to Windows)
 
 - **Menu Bar Only:** hide the Dock icon. Not needed on Windows: Buzzcord already lives in the tray, and closing a buddy list only hides it.
@@ -47,8 +49,8 @@ Nothing. The newest change in `src/` is from 2026-11-02 09:11 (Philippine time),
 
 Windows features from before the copy that the Mac doesn't have, or does differently, are listed under "Not on the Mac" above. They were missing from this file before.
 
-Later, Windows ported the Mac-only features (see "Ported from the Mac"), so those need nothing on the Mac side. One thing found while porting that the Mac should fix: **Mark All as Read** in the Unread window calls `Session.markRead(_:)` in a loop, but `markRead` skips the ack to Discord when the previous one was under a second ago, so on each account only the first chat's read marker reaches Discord (threads aside, which use the unthrottled `markRead(channelId:upTo:)`; the others are read in Buzzcord only and come back as unread after a restart or on the phone). Windows spaces them 1.1 seconds apart (`UnreadForm.MarkAll`).
+Later, Windows ported the Mac-only features (see "Ported from the Mac"), so those need nothing on the Mac side. One thing found while porting that the Mac should fix (**fixed 2026-11-08**: the Mac now spaces them 1.1 s apart per account too, `UnreadModel.markAllRead`): **Mark All as Read** in the Unread window calls `Session.markRead(_:)` in a loop, but `markRead` skips the ack to Discord when the previous one was under a second ago, so on each account only the first chat's read marker reaches Discord (threads aside, which use the unthrottled `markRead(channelId:upTo:)`; the others are read in Buzzcord only and come back as unread after a restart or on the phone). Windows spaces them 1.1 seconds apart (`UnreadForm.MarkAll`).
 
 ## Building and checking the Mac side
 
-`cd mac && ./build.sh --install` builds a universal app. `swift test` runs 34 tests (MLS vectors, a full call against a fake voice server, game lists, rich presence socket, Auto-Away, devices, shortcut, unread, unfriend detection). Hidden checks are listed at the end of `mac/README.md`.
+`cd mac && ./build.sh --install` builds a universal app. `swift test` runs 36 tests (MLS vectors, a full call against a fake voice server, game lists, rich presence socket, Auto-Away, devices, shortcut, unread, unfriend detection). Hidden checks are listed at the end of `mac/README.md`.

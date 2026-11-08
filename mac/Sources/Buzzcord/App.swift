@@ -86,6 +86,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     func showLogin() {
+        if login == nil && !Notice.accept() {
+            // Quit on the first-run notice: nothing to stay open for without an account.
+            if accounts.isEmpty { NSApp.terminate(nil) }
+            return
+        }
         if login == nil {
             login = LoginWindowController { [weak self] token in
                 self?.addAccount(token, save: true)
@@ -250,6 +255,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     static let donateUrl = "https://paypal.me/abstinencelolph"
+    static let siteUrl = "https://app.marcturtal.com/buzzcord/"
+    static let sourceUrl = "https://github.com/mtits/Buzzcord"
 
     @objc func donate(_ sender: Any?) { openExternal(AppDelegate.donateUrl) }
 
@@ -257,11 +264,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let small = NSFont.systemFont(ofSize: 11)
         let center = NSMutableParagraphStyle()
         center.alignment = .center
-        let credits = NSMutableAttributedString(
-            string: "A lightweight, old-school messenger for Discord.\nUnofficial: Discord doesn't allow third-party clients for user accounts, so using it carries some risk to the accounts you sign in with.\n\nIf Buzzcord makes your day a little better, you can buy me a coffee:\n",
-            attributes: [.font: small, .foregroundColor: NSColor.labelColor, .paragraphStyle: center])
-        credits.append(NSAttributedString(string: "Donate \u{2665} (PayPal)",
-            attributes: [.font: NSFont.boldSystemFont(ofSize: 11), .link: URL(string: AppDelegate.donateUrl)!, .paragraphStyle: center]))
+        let credits = NSMutableAttributedString()
+        func add(_ s: String, link: String? = nil, bold: Bool = false) {
+            var attrs: [NSAttributedString.Key: Any] = [.font: bold ? NSFont.boldSystemFont(ofSize: 11) : small, .paragraphStyle: center]
+            if let link { attrs[.link] = URL(string: link)! } else { attrs[.foregroundColor] = NSColor.labelColor }
+            credits.append(NSAttributedString(string: s, attributes: attrs))
+        }
+        add("A lightweight, old-school messenger for Discord, by Marc Turtal.\n\n" +
+            "Unofficial: not affiliated with Discord Inc. or Yahoo, and not made, endorsed or supported by Discord. " +
+            "Free and open source under the MIT License.\n\n")
+        add("app.marcturtal.com/buzzcord", link: AppDelegate.siteUrl)
+        add("   ·   ")
+        add("Source on GitHub", link: AppDelegate.sourceUrl)
+        add("\n\nIf Buzzcord makes your day a little better, you can buy me a coffee:\n")
+        add("Donate \u{2665} (PayPal)", link: AppDelegate.donateUrl, bold: true)
         NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "Buzzcord", .credits: credits])
         NSApp.activate(ignoringOtherApps: true)
     }

@@ -5,8 +5,12 @@ import CryptoKit
 // Hidden checks, run from the command line:
 //   Buzzcord --demo            buddy list and a chat window filled with made-up data (no sign-in)
 //   Buzzcord --gateway-test    connects with a fake token; passes if Discord rejects it with 4004
+//   --demo --notice / --login / --about   also show the first-run notice (saves nothing), the
+//                              sign-in window and the About box
 @MainActor
 enum Demo {
+    private static var demoKeep: [AnyObject] = []
+
     static func run(_ app: AppDelegate) {
         let a = AccountController(token: "demo.token", app: app, index: 0)
         app.accounts.append(a)
@@ -56,6 +60,15 @@ enum Demo {
         if CommandLine.arguments.contains("--profile") { a.showProfile(me, guildId: nil) }
         if let i = CommandLine.arguments.firstIndex(of: "--picture"), i + 1 < CommandLine.arguments.count {
             PictureWindowController.show(url: CommandLine.arguments[i + 1], title: "Alyssa - Profile Picture", fileName: "alyssa profile picture.png")
+        }
+        if CommandLine.arguments.contains("--about") { app.about(nil) }
+        if CommandLine.arguments.contains("--login") {
+            let login = LoginWindowController { _ in }
+            login.showWindow(nil)
+            demoKeep.append(login)
+        }
+        if CommandLine.arguments.contains("--notice") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { _ = Notice.show() }   // saves nothing
         }
         if CommandLine.arguments.contains("--away") {
             AutoAway.shared.sessions = { [] }   // keep the real idle check out of it
