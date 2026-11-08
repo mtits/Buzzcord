@@ -19,7 +19,7 @@ enum Notice {
         "• Sign in with the QR code. Buzzcord never asks for your password.\n" +
         "• Never paste a token, script or \"login code\" someone sends you. That's how accounts get stolen.\n" +
         "• Your sign-in stays on this Mac, in your keychain. Buzzcord connects only to Discord " +
-        "and the services Discord's own app uses (hCaptcha, Spotify album art). No ads, no tracking.\n" +
+        "and the services Discord's own app uses (hCaptcha, Spotify album art), plus GitHub to check for updates. No ads, no tracking.\n" +
         "• Only download Buzzcord from app.marcturtal.com or github.com/mtits/Buzzcord, and compare the SHA-256 listed with each release."
 
     // True if the user accepted (now or before); remembers it so the notice only shows once.
