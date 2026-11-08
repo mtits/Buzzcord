@@ -5,8 +5,38 @@ import CryptoKit
 // Hidden checks, run from the command line:
 //   Buzzcord --demo            buddy list and a chat window filled with made-up data (no sign-in)
 //   Buzzcord --gateway-test    connects with a fake token; passes if Discord rejects it with 4004
+//   --demo --notice / --login / --about   also show the first-run notice (saves nothing), the
+//                              sign-in window and the About box
 @MainActor
 enum Demo {
+    private static var demoKeep: [AnyObject] = []
+
+    // --demo --shots: for website screenshots. Smileys instead of Discord's default avatars
+    // (its logo), and the status line a signed-in account shows.
+    private static var shotPicture = "https://cdn.discordapp.com/embed/avatars/2.png"
+
+    private static func screenshotLook(_ s: Session, _ ids: [String]) {
+        let faces: [(String, NSColor)] = [("😎", .systemTeal), ("🙂", .systemYellow), ("😄", .systemPink),
+                                          ("🤠", .systemOrange), ("😺", .systemPurple), ("🐶", .systemGreen)]
+        for (i, f) in faces.enumerated() {
+            let img = NSImage(size: NSSize(width: 128, height: 128), flipped: false) { r in
+                f.1.withAlphaComponent(0.35).setFill()
+                r.fill()
+                let a: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 84)]
+                let t = NSAttributedString(string: f.0, attributes: a)
+                let sz = t.size()
+                t.draw(at: NSPoint(x: (r.width - sz.width) / 2, y: (r.height - sz.height) / 2))
+                return true
+            }
+            ImageCache.shared.preload("demo://face/\(i)", img)
+            if i < ids.count { User.demoAvatars[ids[i]] = "demo://face/\(i)" }
+            if i == 0, let tiff = img.tiffRepresentation, let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
+                shotPicture = "data:image/png;base64," + png.base64EncodedString()
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { s.connectionState = "Online" }
+    }
+
     static func run(_ app: AppDelegate) {
         let a = AccountController(token: "demo.token", app: app, index: 0)
         app.accounts.append(a)
@@ -57,6 +87,16 @@ enum Demo {
         if let i = CommandLine.arguments.firstIndex(of: "--picture"), i + 1 < CommandLine.arguments.count {
             PictureWindowController.show(url: CommandLine.arguments[i + 1], title: "Alyssa - Profile Picture", fileName: "alyssa profile picture.png")
         }
+        if CommandLine.arguments.contains("--shots") { screenshotLook(s, [alyssa, me, ben, dina, xenia, carlo]) }
+        if CommandLine.arguments.contains("--about") { app.about(nil) }
+        if CommandLine.arguments.contains("--login") {
+            let login = LoginWindowController { _ in }
+            login.showWindow(nil)
+            demoKeep.append(login)
+        }
+        if CommandLine.arguments.contains("--notice") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { _ = Notice.show() }   // saves nothing
+        }
         if CommandLine.arguments.contains("--away") {
             AutoAway.shared.sessions = { [] }   // keep the real idle check out of it
             s.setAutoAway(true)
@@ -78,7 +118,7 @@ enum Demo {
             return m
         }
         chat.add(msg(31, alyssa, "Immortal :fire: **finally**"))
-        chat.add(msg(32, alyssa, "", ["attachments": [["id": "1", "filename": "rank.png", "url": "https://cdn.discordapp.com/embed/avatars/2.png", "content_type": "image/png", "width": 128, "height": 128, "size": 4000]]]))
+        chat.add(msg(32, alyssa, "", ["attachments": [["id": "1", "filename": "rank.png", "url": shotPicture, "content_type": "image/png", "width": 128, "height": 128, "size": 4000]]]))
         chat.add(msg(33, me, "check this clip\nhttps://example.com/clip", ["reactions": [["emoji": ["name": "🔥"], "count": 2, "me": true]]]))
         chat.add(msg(34, alyssa, "I know right `ez`", ["referenced_message": ["author": ["id": me], "content": "that ace was insane"]]))
         chat.add(msg(40, alyssa, "you on tonight? ||it's a surprise||", ["edited_timestamp": "2026-11-03T00:00:00Z"]))

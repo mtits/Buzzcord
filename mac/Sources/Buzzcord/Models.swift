@@ -13,7 +13,11 @@ final class User {
         return username ?? id
     }
 
+    // Demo screenshots only (Demo --shots): user id -> picture key preloaded into ImageCache.
+    nonisolated(unsafe) static var demoAvatars: [String: String] = [:]
+
     func avatarUrl(_ size: Int) -> String {
+        if let d = User.demoAvatars[id] { return d }
         guard let a = avatar, !a.isEmpty else {
             let idx = ((Int64(id) ?? 0) >> 22) % 6
             return "https://cdn.discordapp.com/embed/avatars/\(idx).png"

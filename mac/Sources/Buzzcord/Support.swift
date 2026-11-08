@@ -40,6 +40,8 @@ final class ImageCache {
 
     func cached(_ url: String) -> NSImage? { cache.object(forKey: url as NSString) }
 
+    func preload(_ url: String, _ img: NSImage) { cache.setObject(img, forKey: url as NSString, cost: Int(img.size.width * img.size.height * 4)) }
+
     func load(_ url: String, _ done: @escaping (NSImage?) -> Void) {
         if let img = cached(url) { done(img); return }
         if inflight[url] != nil { inflight[url]!.append(done); return }

@@ -82,7 +82,7 @@ final class LoginWindowController: NSWindowController, NSWindowDelegate {
     init(done: @escaping (String) -> Void) {
         var close: (() -> Void)?
         model = LoginModel { token in done(token); close?() }
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 560), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 590), styleMask: [.titled, .closable], backing: .buffered, defer: false)
         w.title = "Sign in to Buzzcord"
         w.isReleasedWhenClosed = false
         super.init(window: w)
@@ -137,13 +137,16 @@ struct LoginView: View {
                     SecureField("Token", text: $model.token).textFieldStyle(.roundedBorder).onSubmit { model.useToken() }
                     Button("Sign In") { model.useToken() }.disabled(model.busy || model.token.isEmpty)
                 }
+                Text("Paste your own token only. Never paste one someone sent you: that's how accounts get stolen.")
+                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(Color(red: 0.75, green: 0.2, blue: 0.1))
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 20)
             Text("Unofficial: Discord doesn't allow third-party clients for user accounts, so using it carries some risk to the accounts you sign in with.")
                 .font(.system(size: 10)).foregroundStyle(Theme.sub).multilineTextAlignment(.center).padding(.horizontal, 20)
             Spacer(minLength: 0)
         }
-        .frame(width: 360, height: 560)
+        .frame(width: 360, height: 590)
         .background(Theme.panel)
     }
 }

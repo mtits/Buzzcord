@@ -11,10 +11,13 @@ It follows the Windows version in `../src`: the same Discord protocol code, QR l
 
 This builds `build/Buzzcord.app`, signs it with your Apple Development certificate (ad hoc if there's none), and copies it to `~/Applications`. Swift and Xcode's command-line tools are the only requirements.
 
-Hidden checks: `Buzzcord.app/Contents/MacOS/Buzzcord --demo` opens the windows with made-up data, and `--gateway-test` confirms that Discord's rejection of a fake token (close code 4004) is detected.
+`./build.sh dist` makes the release download, `dist/Buzzcord-<version>-mac.zip` and its `.sha256`. It is signed ad hoc (with a Developer ID Application certificate once there is one), because an Apple Development signature doesn't open on other Macs. Until it's notarized, people open it once with System Settings > Privacy & Security > Open Anyway. The version is set at the top of `build.sh`.
+
+Hidden checks: `Buzzcord.app/Contents/MacOS/Buzzcord --demo` opens the windows with made-up data (add `--shots` for website screenshots with smiley avatars instead of Discord's logo; add `--notice`, `--login` or `--about` for the first-run notice, the sign-in window and the About box; the notice saves nothing in the demo), and `--gateway-test` confirms that Discord's rejection of a fake token (close code 4004) is detected.
 
 ## What's in it
 
+- Before the first sign-in, a one-time notice (same wording as Windows): Buzzcord is unofficial, Discord's Terms of Service don't allow third-party clients so accounts could be limited or banned, never paste a token someone sends you, and only download from app.marcturtal.com or GitHub. It offers Open at Login, unticked; nothing starts at login unless you pick it there or in Options. The token box carries the same warning, and the About box says Buzzcord isn't affiliated with Discord Inc. or Yahoo, is MIT-licensed, and links to app.marcturtal.com/buzzcord and the source.
 - Sign in by QR code or by pasting a token. Several accounts at once, one buddy list each. Tokens are kept in the login keychain (item "Buzzcord").
 - Buddy list: Favorites, Recent chats, Group chats, Friends (online first, with games and custom status), Offline friends, Servers (channels by category, voice channels with who's in them) and Friend requests (Accept, Ignore, Cancel). Search box (Cmd+F), Add a Friend (Cmd+N), status and status message.
 - IM windows: history with pictures, GIFs, videos, embeds, replies, reactions (click to toggle; "react" for the picker), edit (Up arrow), delete, typing indicator, formatting buttons, smileys and server emoji, Send File, drag and drop, pasting screenshots, and BUZZ! (Cmd+G). A DM window shows their picture and what they're playing.

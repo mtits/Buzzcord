@@ -168,8 +168,21 @@ final class UnreadModel: ObservableObject {
         details.removeValue(forKey: r.id)
     }
 
+    // Discord takes at most one read marker a second per account (Session.markRead skips
+    // closer ones), so each account's chats are marked 1.1 s apart, accounts side by side.
+    static let markAllSpacing: UInt64 = 1_100_000_000
+
     func markAllRead() {
-        for a in accounts { for r in rows(a) { markRead(r) } }
+        for a in accounts {
+            let todo = rows(a)
+            Task { @MainActor [weak self] in
+                for (i, r) in todo.enumerated() {
+                    if i > 0 { try? await Task.sleep(nanoseconds: Self.markAllSpacing) }
+                    guard let self else { return }
+                    self.markRead(r)
+                }
+            }
+        }
     }
 }
 
