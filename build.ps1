@@ -95,7 +95,17 @@ if ($Package) {
     Copy-Item (Join-Path $root 'assets\README.txt') (Join-Path $stage 'README.txt')
     $zip = Join-Path $dist "Buzzcord-$version-windows.zip"
     if (Test-Path $zip) { Remove-Item $zip -Force }
-    Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip
+    # Entries are named by hand with forward slashes: PowerShell 5's zip helpers write backslashes,
+    # which non-Windows unzip tools treat as part of the file name.
+    Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+    $archive = [IO.Compression.ZipFile]::Open($zip, [IO.Compression.ZipArchiveMode]::Create)
+    try {
+        foreach ($f in Get-ChildItem $stage -Recurse -File) {
+            $name = $f.FullName.Substring($stage.Length + 1).Replace('\', '/')
+            [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $f.FullName, $name, [IO.Compression.CompressionLevel]::Optimal)
+        }
+    }
+    finally { $archive.Dispose() }
     $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
     Set-Content -Encoding ASCII "$zip.sha256" "$hash  $(Split-Path $zip -Leaf)"
     $signed = (Get-AuthenticodeSignature $exe).Status -eq 'Valid'
