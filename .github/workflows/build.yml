@@ -1,0 +1,37 @@
+# Builds Buzzcord on GitHub's Windows machines, so every release zip comes from the public source.
+# This is also what SignPath's free open-source signing needs: it signs builds made here.
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and package
+        shell: powershell
+        run: .\build.ps1 -Package
+
+      - name: Offline self-test
+        shell: powershell
+        # Some checks want sound devices, which GitHub's machines don't have.
+        continue-on-error: true
+        run: .\build.ps1 -Test
+
+      - name: Upload the release zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: Buzzcord-windows
+          path: |
+            dist/*.zip
+            dist/*.sha256

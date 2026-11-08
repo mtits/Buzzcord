@@ -3,8 +3,9 @@ by Marc Turtal - https://app.marcturtal.com/buzzcord/
 
 GETTING STARTED
 1. Keep all these files together in one folder (for example Documents\Buzzcord).
-2. Run Buzzcord.exe. It's signed by Marc Turtal; if Windows says "Windows protected
-   your PC", click More info, check the publisher is Marc Turtal, then Run anyway.
+2. Run Buzzcord.exe. It isn't code-signed yet, so the first time Windows says
+   "Windows protected your PC": click More info, then Run anyway. (With Smart App
+   Control on, Windows blocks unsigned apps entirely; wait for a signed release.)
 3. Sign in with the QR code: Discord on your phone > your profile picture > Scan QR Code.
 
 PLEASE READ

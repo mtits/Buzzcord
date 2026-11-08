@@ -22,10 +22,12 @@ browser. Several accounts at once, rich presence on all of them, and voice calls
 
 - Windows 10 or 11, 64-bit. Nothing to install: .NET Framework 4.8 is already part of Windows.
 - The captcha window uses Microsoft Edge WebView2, which comes with Windows 11 (on Windows 10 it arrives with Microsoft Edge).
-- `Buzzcord.exe` is code-signed by **Marc Turtal**, so Smart App Control lets it run. If Windows shows
-  "Windows protected your PC" on a brand-new release, click **More info**, check that the publisher is
-  Marc Turtal, then **Run anyway**. If the publisher is anything else, don't run it.
-- Each release lists the zip's SHA-256 checksum, so you can check your download.
+- **Buzzcord isn't code-signed yet** (it's a free hobby project, and certificates are expensive; free
+  signing for open-source projects has been applied for). So Windows shows "Windows protected your PC" the
+  first time: click **More info**, then **Run anyway**.
+- If **Smart App Control** is on (Windows Security > App & browser control), Windows blocks unsigned apps
+  completely, with no way to allow just one. Wait for a signed release, or build it from source.
+- Each release lists the zip's SHA-256 checksum, so you can check your download is the real one.
 
 ## Getting started
 
@@ -101,7 +103,7 @@ Not included: video calls and screen share, threads and forum channels, Nitro ex
 
 Buzzcord is free, with no ads and no tracking, and it'll stay that way. It's made by one person in
 the Philippines, on evenings and weekends. If it brought a bit of the old messenger magic back to your
-desktop, a small donation keeps it going and pays for the code signing that lets Windows trust it.
+desktop, a small donation keeps it going and helps pay for a code-signing certificate, so Windows stops warning about it.
 
 **[Donate with PayPal](https://paypal.me/abstinencelolph)**, or from **Help > Donate** in the app. Thank you!
 

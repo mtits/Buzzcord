@@ -64,7 +64,7 @@ namespace Buzzcord
                     "• Never paste a token, script or \"login code\" someone sends you. That's how accounts get stolen.\n" +
                     "• Your sign-in stays on this PC, encrypted for your Windows user. Buzzcord connects only to Discord " +
                     "and the services Discord's own app uses (hCaptcha, Spotify album art). No ads, no tracking.\n" +
-                    "• Only download Buzzcord from app.marcturtal.com or github.com/mtits/Buzzcord. The real exe is signed by Marc Turtal.",
+                    "• Only download Buzzcord from app.marcturtal.com or github.com/mtits/Buzzcord, and compare the SHA-256 listed with each release.",
                 Location = new Point(16, 76), Size = new Size(390, 250)
             };
             startup.Location = new Point(16, 332);
