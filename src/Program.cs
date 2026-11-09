@@ -240,7 +240,7 @@ namespace Buzzcord
                 Settings.Set("UpdatedFrom", "");
                 Settings.Save();
                 Task.Run(() => Updater.CleanupOld(Shortcuts.BinDir));
-                BalloonAction(6000, "Buzzcord is up to date", "Updated to " + Program.Version + ". Click to see what's new.", () => Program.OpenUrl(Updater.ReleasesUrl + "/latest"));
+                BalloonAction(6000, "Buzzcord is up to date", "Updated to " + Program.Version + ". Click to see what's new.", () => Program.OpenUrl(Updater.ReleasesUrl + "/tag/v" + Program.Version));   // "latest" may be a Mac-only release
             }
 
             Start(background);

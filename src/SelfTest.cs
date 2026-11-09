@@ -48,6 +48,9 @@ namespace Buzzcord
             Check("Server member list", MemberListTest);
             Check("Color emoji", EmojiTest);
             Check("Updates: versions, releases, unpacking", UpdateParseTest);
+            Check("Updates: newest Windows release from the list", UpdatePickTest);
+            Check("Friend request links take their own clicks", RowActionTest);
+            Check("Friend request errors are explained", FriendErrorTest);
             Check("Updates: swapping files and rolling back", UpdateApplyTest);
             Check("Donate QR codes", DonateQrTest);
             Check("Shortcut and startup command", LaunchCommandTest);
@@ -514,6 +517,113 @@ namespace Buzzcord
             return null;
         }
 
+        class ClickableRowList : RowList
+        {
+            public void Down(int x, int y, int clicks) { OnMouseDown(new MouseEventArgs(MouseButtons.Left, clicks, x, y, 0)); }
+            public void Double(int x, int y) { OnMouseDoubleClick(new MouseEventArgs(MouseButtons.Left, 2, x, y, 0)); }
+        }
+
+        // A link on a row that's half off the bottom of the list: selecting that row scrolls it into
+        // view, which used to move the link away before the click was hit-tested.
+        static string RowActionTest()
+        {
+            // Creating a control would install WinForms' synchronization context on this thread, and
+            // later tests' async code would then wait for a message loop that never runs.
+            var context = System.Threading.SynchronizationContext.Current;
+            WindowsFormsSynchronizationContext.AutoInstall = false;
+            try { return RowActionChecks(); }
+            finally
+            {
+                WindowsFormsSynchronizationContext.AutoInstall = true;
+                System.Threading.SynchronizationContext.SetSynchronizationContext(context);
+            }
+        }
+
+        static string RowActionChecks()
+        {
+            Func<ClickableRowList> make = () =>
+            {
+                var l = new ClickableRowList { Size = new Size(200, 100) };
+                l.RowHeight = r => 30;
+                l.CreateControl();
+                var rows = new List<object>();
+                for (int i = 0; i < 10; i++) rows.Add("row" + i);
+                l.SetRows(rows);
+                return l;
+            };
+            // Without the hook (as before): the click selects row 3 and scrolls it, so its link moves.
+            var old = make();
+            int before = old.BoundsOf("row3").Y;
+            old.Down(20, 95, 1);
+            Assert(old.SelectedRow as string == "row3" && old.BoundsOf("row3").Y != before, "setup: selecting a half-visible row should scroll it");
+
+            var list = make();
+            int actions = 0, activations = 0;
+            list.RowActivate += r => activations++;
+            // The "link" is the left half of each row.
+            list.RowAction = (r, e) =>
+            {
+                if (!list.BoundsOf(r).Contains(e.Location) || e.X >= 100) return false;
+                if (e.Clicks == 1) actions++;
+                return true;
+            };
+            before = list.BoundsOf("row3").Y;
+            list.Down(20, 95, 1);
+            Assert(actions == 1, "the link click didn't reach the link");
+            Assert(list.SelectedRow == null && list.BoundsOf("row3").Y == before, "the row was selected or scrolled under the click");
+            list.Down(20, 95, 2);
+            list.Double(20, 95);
+            Assert(actions == 1 && activations == 0, "a double-click on the link acted twice or opened the row");
+            list.Down(150, 95, 1);
+            Assert(list.SelectedRow as string == "row3", "a click beside the link should still select the row");
+            list.Dispose();
+            old.Dispose();
+            return null;
+        }
+
+        static string FriendErrorTest()
+        {
+            var captcha = new ApiException(400, Json.O("captcha_sitekey", "x", "captcha_key", new List<object> { "captcha-required" }), "");
+            string m = BuddyListForm.FriendActionError("accept", "Alyssa", captcha);
+            Assert(m.StartsWith("Couldn't accept Alyssa's friend request.") && m.Contains("captcha"), m);
+            m = BuddyListForm.FriendActionError("cancel", "Ben", new ApiException(401, Json.O("message", "401: Unauthorized"), ""));
+            Assert(m.StartsWith("Couldn't cancel your friend request to Ben.") && m.Contains("signed this account out"), m);
+            m = BuddyListForm.FriendActionError("ignore", "Dina", new ApiException(500, Json.O("message", "Internal Server Error"), ""));
+            Assert(m.StartsWith("Couldn't ignore Dina's friend request.") && m.Contains("Internal Server Error"), m);
+            return null;
+        }
+
+        static JObj FakeRelease(string tag, bool draft, bool pre, params string[] assets)
+        {
+            var list = new List<object>();
+            foreach (var a in assets) list.Add(Json.O("name", a, "browser_download_url", "https://example.com/" + a));
+            return Json.O("tag_name", tag, "html_url", "https://github.com/mtits/Buzzcord/releases/tag/" + tag, "body", "",
+                "draft", draft, "prerelease", pre, "assets", list);
+        }
+
+        // GitHub's list is newest first by date; the pick must be the highest version that has a
+        // Windows zip and its checksum, skipping Mac-only releases, drafts and pre-releases.
+        static string UpdatePickTest()
+        {
+            var feed = new List<object> {
+                FakeRelease("v1.3.3", true, false, "Buzzcord-1.3.3-windows.zip", "Buzzcord-1.3.3-windows.zip.sha256"),  // draft
+                FakeRelease("v1.3.2", false, false, "Buzzcord-1.3.2-mac.zip", "Buzzcord-1.3.2-mac.zip.sha256"),          // Mac only
+                FakeRelease("v1.4.0", false, true, "Buzzcord-1.4.0-windows.zip", "Buzzcord-1.4.0-windows.zip.sha256"),  // pre-release flag
+                FakeRelease("v1.5.0-beta", false, false, "Buzzcord-1.5.0-beta-windows.zip", "Buzzcord-1.5.0-beta-windows.zip.sha256"),
+                FakeRelease("v1.3.9", false, false, "Buzzcord-1.3.9-windows.zip"),                                       // no checksum
+                FakeRelease("v1.3.8", false, false, "Buzzcord-1.3.7-windows.zip", "Buzzcord-1.3.7-windows.zip.sha256"),  // wrong version in the name
+                FakeRelease("v1.3.0", false, false, "Buzzcord-1.3.0-mac.zip", "Buzzcord-1.3.0-windows.zip", "Buzzcord-1.3.0-windows.zip.sha256"),
+                FakeRelease("v1.3.1", false, false, "Buzzcord-1.3.1-windows.zip", "Buzzcord-1.3.1-windows.zip.sha256"),  // listed out of order
+                FakeRelease("v1.2.0", false, false, "Buzzcord-1.2.0-windows.zip", "Buzzcord-1.2.0-windows.zip.sha256") };
+            var r = Updater.NewestForWindows(feed);
+            Assert(r != null && r.Tag == "v1.3.1", "picked " + (r != null ? r.Tag : "nothing"));
+            Assert(r.ZipUrl == "https://example.com/Buzzcord-1.3.1-windows.zip" && r.ShaUrl == "https://example.com/Buzzcord-1.3.1-windows.zip.sha256", "assets");
+            Assert(Updater.NewestForWindows(new List<object> { feed[1] }) == null, "a Mac-only list offers nothing");
+            Assert(Updater.NewestForWindows(feed[7]).Tag == "v1.3.1", "a single release object still works");
+            Assert(Updater.NewestForWindows(new List<object>()) == null && Updater.NewestForWindows(null) == null, "empty feed");
+            return r.Tag;
+        }
+
         static string UpdateLiveTest()
         {
             var t = System.Threading.Tasks.Task.Run(async () =>
@@ -521,13 +631,12 @@ namespace Buzzcord
                 using (var http = new System.Net.Http.HttpClient())
                 {
                     http.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "Buzzcord-selftest");
-                    return await http.GetStringAsync("https://api.github.com/repos/" + Updater.Repo + "/releases/latest");
+                    return await http.GetStringAsync(Updater.ListApi);
                 }
             });
             Assert(t.Wait(20000), "GitHub didn't answer in 20 s");
-            var r = Updater.ParseRelease(Json.ParseObj(t.Result));
-            Assert(r != null, "the latest release couldn't be read");
-            Assert(r.ZipUrl != null && r.ShaUrl != null, r.Tag + " has no Windows zip and checksum: updates would skip it");
+            var r = Updater.NewestForWindows(Json.Parse(t.Result));
+            Assert(r != null, "no release with a Windows zip and checksum: updates would find nothing");
             return r.Tag + (r.Version > Updater.Current ? " (newer than this build)" : " (not newer than this build)");
         }
 
