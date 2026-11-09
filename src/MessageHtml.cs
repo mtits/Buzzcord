@@ -28,6 +28,10 @@ a.n:hover{text-decoration:underline;}
 .me{color:#1f4fa0;}
 .them{color:#b0141c;}
 .sys{color:#777;font-style:italic;}
+a.bs{text-decoration:none;cursor:pointer;}
+a.bs:hover{text-decoration:underline;}
+.blk .bb{display:none;}
+.blk.open .bb{display:block;margin-top:2px;}
 .rp{color:#777;font-size:11px;margin-left:14px;}
 .ed{color:#999;font-size:10px;}
 .act{display:none;position:absolute;right:2px;top:1px;background:#fff;border:1px solid #c9bfe2;font-size:11px;padding:0 3px;}
@@ -68,6 +72,7 @@ function replace(id,html){var e=document.getElementById(id);if(!e)return;var d=d
 function removeMsg(id){var e=document.getElementById(id);if(e)e.parentNode.removeChild(e);}
 function setOlder(html){document.getElementById('older').innerHTML=html;}
 function clearLog(){document.getElementById('log').innerHTML='';}
+function blk(a){var p=a.parentNode;p.className=p.className=='blk'?'blk open':'blk';return false;}
 function setTheme(css){document.getElementById('theme').textContent=css;}
 </script></head>
 <body><div id=""older""></div><div id=""log""></div></body></html>";
@@ -96,6 +101,18 @@ function setTheme(css){document.getElementById('theme').textContent=css;}
 
         public static string Render(Session s, JObj m)
         {
+            string id = m.Str("id");
+            var author = m.Obj("author");
+            // Like Discord: a blocked user's message is folded away, one click shows it. The outer
+            // div keeps the message's id, so edits and deletes still find it.
+            if (author == null || !s.IsBlocked(author.Str("id"))) return Message(s, m, true);
+            return "<div class=\"m\" id=\"m" + E(id) + "\"><div class=\"blk\"><a class=\"sys bs\" href=\"#\" onclick=\"return blk(this)\" title=\"Show or hide\">("
+                + E(Snowflake.Time(id).ToString("h:mm tt", CultureInfo.InvariantCulture)) + ") Blocked message</a><div class=\"bb\">"
+                + Message(s, m, false) + "</div></div></div>";
+        }
+
+        static string Message(Session s, JObj m, bool anchor)
+        {
             var sb = new StringBuilder();
             string id = m.Str("id");
             var author = m.Obj("author");
@@ -105,7 +122,9 @@ function setTheme(css){document.getElementById('theme').textContent=css;}
             int type = (int)m.Long("type");
             DateTime time = Snowflake.Time(id);
 
-            sb.Append("<div class=\"m").Append(mention ? " hl" : "").Append("\" id=\"m").Append(E(id)).Append("\">");
+            sb.Append("<div class=\"m").Append(mention ? " hl" : "").Append("\"");
+            if (anchor) sb.Append(" id=\"m").Append(E(id)).Append("\"");
+            sb.Append(">");
 
             var reference = m.Obj("referenced_message");
             if (reference != null)
@@ -114,6 +133,7 @@ function setTheme(css){document.getElementById('theme').textContent=css;}
                 string snippet = reference.Str("content") ?? "";
                 if (snippet.Length > 80) snippet = snippet.Substring(0, 80) + "...";
                 if (snippet.Length == 0) snippet = "(attachment)";
+                if (ra != null && s.IsBlocked(ra.Str("id"))) snippet = "(blocked message)";
                 sb.Append("<div class=\"rp\">&#8618; <b>").Append(E(ra != null ? s.NameOf(ra.Str("id")) : "?")).Append("</b> ").Append(E(snippet)).Append("</div>");
             }
 

@@ -51,6 +51,10 @@ namespace Buzzcord
             Check("Updates: newest Windows release from the list", UpdatePickTest);
             Check("Friend request links take their own clicks", RowActionTest);
             Check("Friend request errors are explained", FriendErrorTest);
+            Check("Blocking: the block list", BlockListTest);
+            Check("Blocking: blocking a friend yourself isn't an unfriend alert", BlockNoAlertTest);
+            Check("Blocking: blocked messages are folded and don't count", BlockedMessagesTest);
+            Check("Remove from Recent: one-to-one chats only", RemoveFromRecentTest);
             Check("Updates: swapping files and rolling back", UpdateApplyTest);
             Check("Donate QR codes", DonateQrTest);
             Check("Shortcut and startup command", LaunchCommandTest);
@@ -593,6 +597,108 @@ namespace Buzzcord
             return null;
         }
 
+        // The blocking checks mirror mac/Tests/BuzzcordTests/BlockingTests.swift.
+        static Session BlockingSession()
+        {
+            string read = SnowflakeDaysAgo(1);
+            var s = new Session("MTIzNDU2Nzg5.blocking.test");
+            s.Inject("READY", Json.O(
+                "session_id", "x",
+                "user", Json.O("id", "1", "username", "me"),
+                "users", new List<object> { Json.O("id", "2", "username", "alyssa"), Json.O("id", "3", "username", "ben"), Json.O("id", "4", "username", "zed") },
+                "relationships", new List<object> { Json.O("id", "2", "type", 1L), Json.O("id", "3", "type", 1L), Json.O("id", "4", "type", 2L) },
+                "private_channels", new List<object> {
+                    Json.O("id", "10", "type", 1L, "recipient_ids", new List<object> { "2" }, "last_message_id", read),
+                    Json.O("id", "11", "type", 3L, "recipient_ids", new List<object> { "2", "4" }, "last_message_id", read) },
+                "read_state", Json.O("entries", new List<object> {
+                    Json.O("id", "10", "last_message_id", read),
+                    Json.O("id", "11", "last_message_id", read) })));
+            return s;
+        }
+
+        static string BlockListTest()
+        {
+            var s = BlockingSession();
+            Assert(s.IsBlocked("4") && !s.IsBlocked("2") && !s.IsBlocked(null) && !s.IsBlocked("999"), "IsBlocked");
+            Assert(string.Join(",", s.BlockedUsers()) == "4", "block list: " + string.Join(",", s.BlockedUsers()));
+            s.Inject("RELATIONSHIP_ADD", Json.O("id", "5", "type", 2L, "user", Json.O("id", "5", "username", "amy")));
+            Assert(string.Join(",", s.BlockedUsers()) == "5,4", "sorted by name (amy, zed): " + string.Join(",", s.BlockedUsers()));
+            Assert(Blocking.Question(s, "2") == "Block alyssa?\n\nThey won't be able to message or call you, and their messages in servers and group chats are hidden. If you're friends, this also removes them as a friend. They aren't told.", Blocking.Question(s, "2"));
+            Assert(Blocking.ErrorText("unblock", "zed", new ApiException(401, Json.O("message", "401: Unauthorized"), "")).StartsWith("Couldn't unblock zed.\n\nDiscord signed this account out"), "unblock error text");
+            return null;
+        }
+
+        // Blocking a friend yourself isn't reported as them unfriending you, whichever way Discord
+        // sends it (remove + add, or one update). The fake token makes the calls themselves fail.
+        static string BlockNoAlertTest()
+        {
+            var s = BlockingSession();
+            var fired = new List<string>();
+            s.Unfriended += id => fired.Add(id);
+            s.Block("2", "Friends").ContinueWith(t => { var ignored = t.Exception; });
+            s.Inject("RELATIONSHIP_REMOVE", Json.O("id", "2", "type", 1L));
+            s.Inject("RELATIONSHIP_ADD", Json.O("id", "2", "type", 2L, "user", Json.O("id", "2", "username", "alyssa")));
+            s.Block("3", "Friends").ContinueWith(t => { var ignored = t.Exception; });
+            s.Inject("RELATIONSHIP_UPDATE", Json.O("id", "3", "type", 2L));
+            Assert(fired.Count == 0, "alerted: " + string.Join(",", fired));
+            Assert(string.Join(",", s.BlockedUsers()) == "2,3,4", "block list: " + string.Join(",", s.BlockedUsers()));
+            s.Inject("RELATIONSHIP_REMOVE", Json.O("id", "4", "type", 2L));   // unblocked
+            Assert(!s.IsBlocked("4") && fired.Count == 0, "unblocking isn't an unfriend");
+            // Later friends again, and this time they remove you: that is reported.
+            s.Inject("RELATIONSHIP_REMOVE", Json.O("id", "3", "type", 2L));
+            s.Inject("RELATIONSHIP_ADD", Json.O("id", "3", "type", 1L));
+            s.Inject("RELATIONSHIP_REMOVE", Json.O("id", "3", "type", 1L));
+            Assert(fired.Count == 1 && fired[0] == "3", "a real unfriend after a block wasn't reported: " + string.Join(",", fired));
+            return null;
+        }
+
+        static string BlockedMessagesTest()
+        {
+            var s = BlockingSession();
+            string theirId = SnowflakeDaysAgo(0.02), friendId = SnowflakeDaysAgo(0.01);
+            var theirs = Json.O("id", theirId, "channel_id", "11", "type", 0L, "content", "hello there", "author", Json.O("id", "4", "username", "zed"));
+            string html = MessageHtml.Render(s, theirs);
+            Assert(html.Contains("class=\"blk\"") && html.Contains(") Blocked message</a>"), "not folded: " + html);
+            Assert(html.Split(new[] { "id=\"m" + theirId + "\"" }, StringSplitOptions.None).Length == 2, "one element with the message's id, so edits and deletes find it");
+            Assert(html.Contains("hello there"), "one click shows it, so the text is there (hidden)");
+            Assert(MessageHtml.Page.Contains("function blk("), "the page has the show/hide script");
+
+            var friend = Json.O("id", friendId, "channel_id", "11", "type", 0L, "content", "hi", "author", Json.O("id", "2", "username", "alyssa"),
+                "referenced_message", Json.O("id", theirId, "content", "hello there", "author", Json.O("id", "4")));
+            string reply = MessageHtml.Render(s, friend);
+            Assert(!reply.Contains("class=\"blk\"") && reply.Contains("(blocked message)") && !reply.Contains("hello there"), "a reply doesn't quote the blocked message: " + reply);
+
+            s.Inject("MESSAGE_CREATE", theirs);
+            Assert(!s.IsUnread(s.FindChannel("11")) && s.BadgeCount() == 0, "a blocked user's message in a group chat counts as new");
+            s.Inject("MESSAGE_CREATE", friend);
+            Assert(s.IsUnread(s.FindChannel("11")) && s.BadgeCount() == 1, "a friend's message should count, badge " + s.BadgeCount());
+            s.Inject("MESSAGE_CREATE", Json.O("id", SnowflakeDaysAgo(0.005), "channel_id", "11", "type", 0L, "content", "again", "author", Json.O("id", "4")));
+            Assert(s.IsUnread(s.FindChannel("11")) && s.BadgeCount() == 1, "a blocked message adds nothing to an unread chat, badge " + s.BadgeCount());
+            return null;
+        }
+
+        static string RemoveFromRecentTest()
+        {
+            var s = BlockingSession();
+            Channel dm = s.FindChannel("10"), group = s.FindChannel("11");
+            Assert(Blocking.CanRemoveFromRecent(s, dm, true), "offered for a DM in Recent chats");
+            Assert(!Blocking.CanRemoveFromRecent(s, dm, false), "not offered outside Recent chats");
+            Assert(!Blocking.CanRemoveFromRecent(s, group, true), "never offered for a group chat");
+            Favorites.SetPinned(s, "10", true);
+            try { Assert(!Blocking.CanRemoveFromRecent(s, dm, true), "not offered while pinned to Favorites"); }
+            finally { Favorites.SetPinned(s, "10", false); }
+
+            Assert(s.CloseDm(group).IsCompleted && s.PrivateChannels.ContainsKey("11"), "closing a group would leave it: it must never run");
+            var t = s.CloseDm(dm);
+            Assert(!s.PrivateChannels.ContainsKey("10"), "the DM should leave the list right away");
+            bool done;
+            try { done = t.Wait(30000); }
+            catch (AggregateException) { done = true; }
+            if (!done) return "Discord didn't answer; skipped the put-back check";
+            Assert(t.IsFaulted && s.PrivateChannels.ContainsKey("10"), "a DM Discord refused to close (fake token) should come back");
+            return null;
+        }
+
         static JObj FakeRelease(string tag, bool draft, bool pre, params string[] assets)
         {
             var list = new List<object>();
@@ -992,11 +1098,21 @@ namespace Buzzcord
             InjectMemberList(s);
             Pump(1500);
             Capture(server, Path.Combine(dir, "chat-server.png"));
+            // Someone you blocked is in the group: their message is folded, and a reply doesn't quote it.
+            s.Inject("RELATIONSHIP_ADD", Json.O("id", "207", "type", 2L, "user", Json.O("id", "207", "username", "zedd", "global_name", "Zed")));
             var groupChat = new ChatForm(s, s.PrivateChannels["501"], false) { StartPosition = FormStartPosition.Manual, Location = new Point(320, 80) };
             groupChat.Show();
             Pump(1500);
+            const string blockedId = "1300000000000000100";
+            groupChat.Add(Json.O("id", blockedId, "channel_id", "501", "type", 0L, "content", "you're all trash at this game", "author", Json.O("id", "207", "username", "zedd")));
+            groupChat.Add(Json.O("id", "1300000000000000200", "channel_id", "501", "type", 0L, "content", "ignore him lol", "author", Json.O("id", "200", "username", "alyssa"),
+                "referenced_message", Json.O("id", blockedId, "content", "you're all trash at this game", "author", Json.O("id", "207"))));
+            Pump(800);
             Capture(groupChat, Path.Combine(dir, "chat-group.png"));
             groupChat.Close();
+            BlockedForm.Open(s);
+            Pump(1500);
+            foreach (Form f in Application.OpenForms) if (f is BlockedForm) { Capture(f, Path.Combine(dir, "blocked.png")); f.Close(); break; }
 
             var alerts = new AlertsForm(s, list) { StartPosition = FormStartPosition.Manual, Location = new Point(360, 80) };
             alerts.Show();
