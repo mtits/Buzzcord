@@ -15,9 +15,9 @@ using Microsoft.Win32;
 [assembly: AssemblyDescription("A lightweight, old-school messenger for Discord")]
 [assembly: AssemblyCompany("Marc Turtal")]
 [assembly: AssemblyCopyright("Â© 2026 Marc Turtal")]
-[assembly: AssemblyVersion("1.3.3.0")]
-[assembly: AssemblyFileVersion("1.3.3.0")]
-[assembly: AssemblyInformationalVersion("1.3.3")]
+[assembly: AssemblyVersion("1.4.0.0")]
+[assembly: AssemblyFileVersion("1.4.0.0")]
+[assembly: AssemblyInformationalVersion("1.4.0")]
 
 namespace Buzzcord
 {
