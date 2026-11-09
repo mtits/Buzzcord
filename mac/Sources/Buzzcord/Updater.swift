@@ -2,8 +2,8 @@ import AppKit
 import CryptoKit
 import Foundation
 
-// Updates from GitHub Releases, like the Windows Updater.cs. The latest release's Mac zip is
-// downloaded in the background, checked against the SHA-256 file published beside it, and
+// Updates from GitHub Releases, like the Windows Updater.cs. The newest release that has a Mac
+// zip is downloaded in the background, checked against the SHA-256 file published beside it, and
 // unpacked with ditto into ~/Library/Application Support/Buzzcord/update/<version>. Installing
 // swaps the .app bundle in place: the running one is moved aside, the new one moved in (put
 // back if anything fails), the new copy is started with --updated, and it deletes the old one.
@@ -13,7 +13,9 @@ import Foundation
 enum Updater {
     static let repo = "mtits/Buzzcord"
     static let releasesUrl = "https://github.com/\(repo)/releases"
-    static let latestApi = "https://api.github.com/repos/\(repo)/releases/latest"
+    // The list, not /releases/latest: a release can be for one platform only (v1.3.2 was Mac only),
+    // and GitHub's "latest" would then hide the other platform's newest release.
+    static let listApi = "https://api.github.com/repos/\(repo)/releases?per_page=20"
 
     // End-to-end check only: a copy whose bundle id ends in ".updatetest" (so it has its own
     // settings) can read a local feed and runs without signing in. See mac/README.md.
@@ -21,7 +23,7 @@ enum Updater {
         guard Bundle.main.bundleIdentifier?.hasSuffix(".updatetest") == true else { return nil }
         return Prefs.string("UpdateTestMode")
     }
-    static var feed: String { testMode != nil ? (Prefs.string("UpdateFeedURL") ?? latestApi) : latestApi }
+    static var feed: String { testMode != nil ? (Prefs.string("UpdateFeedURL") ?? listApi) : listApi }
 
     struct Version: Comparable, CustomStringConvertible {
         let parts: [Int]   // always 3: major, minor, patch
@@ -58,7 +60,7 @@ enum Updater {
         Version(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? Version("0.0.0")!
     }
 
-    // Reads GET /repos/{repo}/releases/latest. Nil for drafts, pre-releases and odd tags.
+    // Reads one release from GET /repos/{repo}/releases. Nil for drafts, pre-releases and odd tags.
     static func parseRelease(_ j: JObj?) -> Release? {
         guard let j, !j.bool("draft"), !j.bool("prerelease"), let tag = j.str("tag_name"), let v = Version(tag) else { return nil }
         var r = Release(version: v, tag: tag, notes: j.str("body") ?? "", pageUrl: j.str("html_url") ?? releasesUrl)
@@ -72,6 +74,13 @@ enum Updater {
             }
         }
         return r
+    }
+
+    // The highest version that has a Mac zip and its checksum. Takes the release list, or one
+    // release (older test feeds). GitHub lists by date, not version, so every entry is compared.
+    static func newestForMac(_ feed: Any?) -> Release? {
+        let list = (feed as? [JObj]) ?? (feed as? JObj).map { [$0] } ?? []
+        return list.compactMap(parseRelease).filter { $0.zipUrl != nil && $0.shaUrl != nil }.max { $0.version < $1.version }
     }
 
     static func sha256(_ data: Data) -> String {
@@ -111,10 +120,10 @@ enum Updater {
         return data
     }
 
-    // The latest release if it's newer than this copy and has a Mac zip, else nil.
+    // The newest release with a Mac zip if it's newer than this copy, else nil.
     static func check() async throws -> Release? {
-        guard let r = parseRelease(Json.parse(try await get(feed)) as? JObj) else { return nil }
-        return r.version > current && r.zipUrl != nil ? r : nil
+        guard let r = newestForMac(Json.parse(try await get(feed))) else { return nil }
+        return r.version > current ? r : nil
     }
 
     static var root: URL { AppPaths.support.appendingPathComponent("update", isDirectory: true) }
@@ -305,6 +314,7 @@ final class UpdateController {
     var onChange: () -> Void = {}   // the menu bar menu's "Restart to update" item
     private var timer: Timer?
     private var checking = false
+    private var noticedPage: String?   // the release a "Buzzcord X is out" banner is about
 
     static var automatic: Bool { Prefs.bool("AutoUpdate", true) }
 
@@ -373,6 +383,7 @@ final class UpdateController {
                         if confirm("Buzzcord \(r.version) is out.\n\n\(why)", ok: "Open Download Page") { openExternal(r.pageUrl) }
                     } else if Prefs.string("UpdateNoticed") != r.tag {
                         Prefs.set("UpdateNoticed", r.tag)
+                        noticedPage = r.pageUrl
                         Notifier.shared.alert(account: Self.notifyKey, channel: "page", title: "Buzzcord \(r.version) is out", body: why, sound: nil)
                     }
                     return
@@ -426,8 +437,7 @@ final class UpdateController {
     func clicked(_ what: String) {
         switch what {
         case "install": if Updater.staged != nil { install() }
-        case "page": openExternal(Updater.releasesUrl + "/latest")
-        default: openExternal(Updater.releasesUrl + "/latest")
+        default: openExternal(noticedPage ?? Updater.releasesUrl)   // "page"
         }
     }
 

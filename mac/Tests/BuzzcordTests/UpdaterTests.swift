@@ -47,6 +47,40 @@ final class UpdaterTests: XCTestCase {
         XCTAssertNil(Updater.parseRelease(nil))
     }
 
+    private func both(_ v: String) -> [String] {
+        ["Buzzcord-\(v)-windows.zip", "Buzzcord-\(v)-windows.zip.sha256", "Buzzcord-\(v)-mac.zip", "Buzzcord-\(v)-mac.zip.sha256"]
+    }
+
+    // GitHub's "latest" can be a release for the other platform only; the Mac must look past it.
+    func testNewestReleaseWithAMacZip() {
+        let list: [JObj] = [
+            release(tag: "v1.4.1", assets: ["Buzzcord-1.4.1-windows.zip", "Buzzcord-1.4.1-windows.zip.sha256"]),   // Windows only, newest
+            release(tag: "v1.5.0", draft: true, assets: both("1.5.0")),
+            release(tag: "v1.5.0-rc1", pre: true, assets: both("1.5.0-rc1")),
+            release(tag: "v1.4.2", assets: ["Buzzcord-1.4.2-mac.zip"]),   // no checksum: can't be verified
+            release(tag: "v1.3.2", assets: ["Buzzcord-1.3.2-mac.zip", "Buzzcord-1.3.2-mac.zip.sha256"]),
+            release(tag: "v1.4.0", assets: both("1.4.0")),   // listed out of order on purpose
+            release(tag: "v1.3.0", assets: both("1.3.0")),
+        ]
+        let r = Updater.newestForMac(list)
+        XCTAssertEqual(r?.version.description, "1.4.0")
+        XCTAssertEqual(r?.zipUrl, "https://example.com/Buzzcord-1.4.0-mac.zip")
+        XCTAssertEqual(r?.pageUrl, "https://github.com/mtits/Buzzcord/releases/tag/v1.4.0")
+
+        // The real situation on 2026-11-09: v1.3.2 (Mac only) is GitHub's latest.
+        let now: [JObj] = [release(tag: "v1.3.2", assets: ["Buzzcord-1.3.2-mac.zip", "Buzzcord-1.3.2-mac.zip.sha256"]),
+                           release(tag: "v1.3.1", assets: ["Buzzcord-1.3.1-windows.zip", "Buzzcord-1.3.1-windows.zip.sha256"]),
+                           release(tag: "v1.3.0", assets: both("1.3.0"))]
+        XCTAssertEqual(Updater.newestForMac(now)?.version.description, "1.3.2")
+
+        // A single release object (older local test feeds) still works.
+        XCTAssertEqual(Updater.newestForMac(release(tag: "v1.3.0", assets: both("1.3.0")))?.version.description, "1.3.0")
+        XCTAssertNil(Updater.newestForMac([release(tag: "v1.4.1", assets: ["Buzzcord-1.4.1-windows.zip"])]))
+        XCTAssertNil(Updater.newestForMac([JObj]()))
+        XCTAssertNil(Updater.newestForMac(nil))
+        XCTAssertNil(Updater.newestForMac(["message": "API rate limit exceeded"]))
+    }
+
     func testChecksum() {
         let zip = Data("pretend this is a zip".utf8)
         let hash = Updater.sha256(zip)
