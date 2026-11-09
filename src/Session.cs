@@ -571,10 +571,17 @@ namespace Buzzcord
         // Ignores a request, cancels one you sent, or unfriends.
         public Task RemoveRelationship(string userId, string location)
         {
-            removedByMe.Add(userId); // so the RELATIONSHIP_REMOVE that follows isn't reported as them unfriending you
+            return RemovedByMe(userId, () => Api.SendWithContext(HttpMethod.Delete, "/users/@me/relationships/" + userId, null, location));
+        }
+
+        // Marks userId so the RELATIONSHIP_REMOVE that follows isn't reported as them unfriending
+        // you. If Discord refused, nothing was removed: forget it again, or a real unfriend later
+        // would be missed.
+        Task RemovedByMe(string userId, Func<Task> send)
+        {
+            removedByMe.Add(userId);
             var ui = SynchronizationContext.Current;
-            var task = Api.SendWithContext(HttpMethod.Delete, "/users/@me/relationships/" + userId, null, location);
-            // If Discord refused, nothing was removed: forget it, or a real unfriend later would be missed.
+            var task = send();
             task.ContinueWith(t =>
             {
                 if (ui != null) ui.Post(_ => removedByMe.Remove(userId), null);
@@ -584,6 +591,54 @@ namespace Buzzcord
         }
 
         readonly HashSet<string> removedByMe = new HashSet<string>();
+
+        // ---- blocking ----
+
+        public bool IsBlocked(string userId)
+        {
+            int rel;
+            return userId != null && Relationships.TryGetValue(userId, out rel) && rel == 2;
+        }
+
+        // Everyone you blocked, by name.
+        public List<string> BlockedUsers()
+        {
+            var list = new List<string>(RelationshipsOfType(2));
+            list.Sort((a, b) =>
+            {
+                int c = string.Compare(NameOf(a), NameOf(b), StringComparison.CurrentCultureIgnoreCase);
+                return c != 0 ? c : string.CompareOrdinal(a, b);
+            });
+            return list;
+        }
+
+        // Blocking a friend also unfriends them. Discord stops their DMs and calls; their messages
+        // in servers and group chats still arrive and Buzzcord folds them away.
+        public Task Block(string userId, string location)
+        {
+            return RemovedByMe(userId, () => Api.SendWithContext(HttpMethod.Put, "/users/@me/relationships/" + userId, Json.O("type", 2L), location));
+        }
+
+        public Task Unblock(string userId, string location)
+        {
+            return Api.SendWithContext(HttpMethod.Delete, "/users/@me/relationships/" + userId, null, location);
+        }
+
+        // Takes a one-to-one chat off Recent chats at once, like the X in Discord's DM list. The
+        // messages stay, and it comes back with the next message. Never a group: closing one means
+        // leaving it. If Discord refuses, the chat is put back.
+        public async Task CloseDm(Channel c)
+        {
+            if (c == null || !c.IsDm || !PrivateChannels.ContainsKey(c.Id)) return;
+            PrivateChannels.Remove(c.Id);
+            Changed();
+            try { await Api.Delete("/channels/" + c.Id); }
+            catch
+            {
+                if (!PrivateChannels.ContainsKey(c.Id)) { PrivateChannels[c.Id] = c; Changed(); }
+                throw;
+            }
+        }
 
         public async Task<Channel> OpenDm(string userId)
         {
@@ -710,6 +765,9 @@ namespace Buzzcord
                         int before;
                         Relationships.TryGetValue(id, out before);
                         Relationships[id] = (int)d.Long("type");
+                        // Blocked: whatever removal was expected has happened (Discord may send
+                        // one update instead of remove + add), so don't let the mark linger.
+                        if (d.Long("type") == 2) removedByMe.Remove(id);
                         if (d.Has("nickname")) Nicknames[id] = d.Str("nickname");
                         if (t == "RELATIONSHIP_ADD" && d.Long("type") == 3 && FriendRequest != null) FriendRequest(id);
                         if (before == 4 && d.Long("type") == 1 && FriendAccepted != null) FriendAccepted(id);
@@ -1145,8 +1203,11 @@ namespace Buzzcord
             var c = FindChannel(cid);
             if (c != null)
             {
+                bool wasUnread = IsUnread(c);
                 c.LastMessageId = m.Str("id");
                 if (author != null && Me != null && author.Str("id") == Me.Id) ReadStates[cid] = c.LastMessageId;
+                // A blocked user's message doesn't make the chat new (only here: Discord isn't told).
+                else if (author != null && IsBlocked(author.Str("id"))) { if (!wasUnread) ReadStates[cid] = c.LastMessageId; }
                 else if (Me != null && (c.IsPrivate ? !IsMuted(c) : ShouldNotifyMention(m)))
                     Mentions[cid] = MentionCount(cid) + 1;
             }

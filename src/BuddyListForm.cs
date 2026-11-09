@@ -299,6 +299,7 @@ namespace Buzzcord
             messenger.DropDownItems.Add(new ToolStripMenuItem("&Search", null, (s, e) => { search.Focus(); search.SelectAll(); }) { ShortcutKeys = Keys.Control | Keys.F });
             messenger.DropDownItems.Add(new ToolStripMenuItem("&Mentions && notifications", null, (s, e) => ShowAlerts()) { ShortcutKeys = Keys.Control | Keys.M });
             messenger.DropDownItems.Add(new ToolStripMenuItem("&Unread messages", null, (s, e) => UnreadForm.Open(app)) { ShortcutKeys = Keys.Control | Keys.Shift | Keys.U });
+            messenger.DropDownItems.Add("&Blocked users...", null, (s, e) => BlockedForm.Open(Session));
             messenger.DropDownItems.Add(new ToolStripSeparator());
             messenger.DropDownItems.Add("&Add account...", null, (s, e) => app.AddAccount());
             messenger.DropDownItems.Add("Open &saved files", null, (s, e) => OpenFolder(System.IO.Path.Combine(Settings.SaveFolder, AutoSaver.Clean(Session.Me != null ? Session.Me.Username : ""))));
@@ -859,6 +860,13 @@ namespace Buzzcord
                             catch (Exception ex) { MessageBox.Show(this, ex.Message, "Buzzcord"); }
                         });
                     }
+                    // Recent chats rows only (Favorites rows start with "fav"), never groups or pinned chats.
+                    if (r.Kind == Kind.Dm && Blocking.CanRemoveFromRecent(Session, r.Channel, r.Key.StartsWith("c")))
+                    {
+                        var dm = r.Channel;
+                        menu.Items.Add("Remove from Recent", null, (s, e) => Blocking.RemoveFromRecent(this, Session, dm));
+                    }
+                    AddBlockItem(menu, r.Id, r.Kind == Kind.Dm ? "DM Channel" : "Friends");
                     break;
                 case Kind.Pending:
                     {
@@ -877,6 +885,7 @@ namespace Buzzcord
                             try { OpenChat(await Session.OpenDm(pid), true); }
                             catch (Exception ex) { MessageBox.Show(this, ex.Message, "Buzzcord"); }
                         });
+                        AddBlockItem(menu, pid, "Friends");
                         break;
                     }
                 case Kind.Group:
@@ -912,6 +921,14 @@ namespace Buzzcord
                     return;
             }
             menu.Show(list, at);
+        }
+
+        // "Block..." at the bottom of a person's menu, unless they're already blocked (or you).
+        void AddBlockItem(ContextMenuStrip menu, string userId, string location)
+        {
+            if (userId == null || Session.IsBlocked(userId) || (Session.Me != null && userId == Session.Me.Id)) return;
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add("Block...", null, (s, e) => Blocking.Block(this, Session, userId, location));
         }
 
         // Pin / follow items at the top of a row's menu (chats and channels only).
@@ -1160,11 +1177,7 @@ namespace Buzzcord
             string what = action == "accept" ? "accept " + name + "'s friend request"
                 : action == "ignore" ? "ignore " + name + "'s friend request"
                 : "cancel your friend request to " + name;
-            var api = ex as ApiException;
-            string why = api != null && api.IsCaptcha ? "Discord asked for a captcha and it wasn't solved. Try again and finish the captcha."
-                : api != null && api.Status == 401 ? "Discord signed this account out. Sign in again."
-                : (ex.GetBaseException().Message ?? "unknown error");
-            return "Couldn't " + what + ".\n\n" + why;
+            return "Couldn't " + what + ".\n\n" + Blocking.Reason(ex);
         }
 
         public async void AddFriend(string prefill)
@@ -1248,6 +1261,7 @@ namespace Buzzcord
             chats.TryGetValue(cid, out chat);
             if (chat != null) chat.Add(m);
             if (mine || c == null) return;
+            if (author != null && Session.IsBlocked(author.Str("id"))) return;   // shown folded, never alerted
 
             // What kind of alert this is, if any.
             AlertKind kind;

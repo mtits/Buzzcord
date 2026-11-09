@@ -20,6 +20,8 @@ namespace Buzzcord
         readonly string userId, guildId;
         readonly WebBrowser web = new WebBrowser();
         readonly Label status = new Label { AutoSize = false, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, ForeColor = Color.DimGray };
+        readonly FlowLayoutPanel buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 38, Padding = new Padding(6, 6, 6, 0), WrapContents = false, BackColor = Icons.Panel };
+        int shownRel;
         JObj profile;
         string avatarFile, html;
 
@@ -60,39 +62,7 @@ namespace Buzzcord
             web.Navigating += Navigating;
             web.NewWindow += (o, e) => e.Cancel = true;
 
-            var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 38, Padding = new Padding(6, 6, 6, 0), BackColor = Icons.Panel };
-            bool isMe = s.Me != null && userId == s.Me.Id;
-            if (!isMe) buttons.Controls.Add(Btn("Message", async () =>
-            {
-                try
-                {
-                    var c = await s.OpenDm(userId);
-                    if (s.OpenChatHandler != null) s.OpenChatHandler(c);
-                }
-                catch (Exception ex) { MessageBox.Show(this, ex.Message, "Buzzcord"); }
-            }));
-            int rel;
-            s.Relationships.TryGetValue(userId, out rel);
-            if (!isMe && (rel == 0 || rel == 3))
-            {
-                // Not friends yet: send a request, or accept theirs.
-                Button add = null;
-                add = Btn(rel == 3 ? "Accept Request" : "Add Friend", async () =>
-                {
-                    add.Enabled = false;
-                    try
-                    {
-                        await s.AddOrAcceptFriend(userId, "User Profile");
-                        status.Text = rel == 3 ? "You're now friends." : "Friend request sent.";
-                    }
-                    catch (Exception ex) { add.Enabled = true; MessageBox.Show(this, ex.Message, "Buzzcord"); }
-                });
-                buttons.Controls.Add(add);
-                ClientSize = new Size(440, ClientSize.Height);
-            }
-            buttons.Controls.Add(Btn("Full Picture", () => OpenPicture()));
-            buttons.Controls.Add(Btn("Saved Pictures", () => OpenFolder(PictureFolder(s, s.GetUser(userId)))));
-            buttons.Controls.Add(Btn("Copy Name", () => Clipboard.SetText(s.GetUser(userId).Username ?? userId)));
+            BuildButtons();
 
             var statusBar = new Panel { Dock = DockStyle.Bottom, Height = 20, Padding = new Padding(8, 0, 8, 0) };
             statusBar.Controls.Add(status);
@@ -115,6 +85,73 @@ namespace Buzzcord
             };
             GameBoard.Changed += boardChanged;
             FormClosed += (o, e) => GameBoard.Changed -= boardChanged;
+            // Blocked, unblocked, friended: new buttons, and the "Blocked" line in the profile.
+            Action listChanged = () =>
+            {
+                if (IsDisposed || Relationship == shownRel) return;
+                BuildButtons();
+                html = Render();
+                web.DocumentText = html;
+            };
+            s.ListChanged += listChanged;
+            FormClosed += (o, e) => s.ListChanged -= listChanged;
+        }
+
+        int Relationship { get { int rel; s.Relationships.TryGetValue(userId, out rel); return rel; } }
+
+        // The buttons depend on the relationship: Message (not while blocked), Add Friend or
+        // Accept Request, Unblock or Block..., then the picture and name buttons.
+        void BuildButtons()
+        {
+            int rel = shownRel = Relationship;
+            bool isMe = IsMe;
+            buttons.SuspendLayout();
+            while (buttons.Controls.Count > 0) buttons.Controls[0].Dispose();
+            if (!isMe && rel != 2) buttons.Controls.Add(Btn("Message", async () =>
+            {
+                try
+                {
+                    var c = await s.OpenDm(userId);
+                    if (s.OpenChatHandler != null) s.OpenChatHandler(c);
+                }
+                catch (Exception ex) { MessageBox.Show(this, ex.Message, "Buzzcord"); }
+            }));
+            if (!isMe && (rel == 0 || rel == 3))
+            {
+                // Not friends yet: send a request, or accept theirs.
+                Button add = null;
+                add = Btn(rel == 3 ? "Accept Request" : "Add Friend", async () =>
+                {
+                    add.Enabled = false;
+                    try
+                    {
+                        await s.AddOrAcceptFriend(userId, "User Profile");
+                        status.Text = rel == 3 ? "You're now friends." : "Friend request sent.";
+                    }
+                    catch (Exception ex) { if (!add.IsDisposed) add.Enabled = true; MessageBox.Show(this, ex.Message, "Buzzcord"); }
+                });
+                buttons.Controls.Add(add);
+            }
+            if (!isMe && rel == 2)
+            {
+                Button unblock = null;
+                unblock = Btn("Unblock", async () =>
+                {
+                    unblock.Enabled = false;
+                    if (await Blocking.Unblock(this, s, userId, "User Profile")) status.Text = "Unblocked.";
+                    else if (!unblock.IsDisposed) unblock.Enabled = true;
+                });
+                buttons.Controls.Add(unblock);
+            }
+            else if (!isMe) buttons.Controls.Add(Btn("Block...", () => Blocking.Block(this, s, userId, "User Profile")));
+            buttons.Controls.Add(Btn("Full Picture", () => OpenPicture()));
+            buttons.Controls.Add(Btn("Saved Pictures", () => OpenFolder(PictureFolder(s, s.GetUser(userId)))));
+            buttons.Controls.Add(Btn("Copy Name", () => Clipboard.SetText(s.GetUser(userId).Username ?? userId)));
+            buttons.ResumeLayout();
+            // Wide enough for the buttons in one row (the bar is one button high).
+            int need = buttons.Padding.Horizontal;
+            foreach (Control c in buttons.Controls) need += c.PreferredSize.Width + c.Margin.Horizontal;
+            if (need > ClientSize.Width) ClientSize = new Size(need, ClientSize.Height);
         }
 
         static Button Btn(string text, Action click)
