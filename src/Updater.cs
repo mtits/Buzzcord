@@ -9,7 +9,7 @@ using System.Windows.Forms;
 
 namespace Buzzcord
 {
-    // Updates from GitHub Releases. The latest release's Windows zip is downloaded in the background,
+    // Updates from GitHub Releases. The newest release that has a Windows zip is downloaded in the background,
     // checked against the SHA-256 file published beside it, and unpacked into a staging folder.
     // Installing swaps the files in place: Windows lets a running exe be renamed, so each old file
     // becomes "<name>.old", the new one is copied in, and the restarted Buzzcord deletes the .old
@@ -18,6 +18,10 @@ namespace Buzzcord
     {
         public const string Repo = "mtits/Buzzcord";
         public static string ReleasesUrl { get { return "https://github.com/" + Repo + "/releases"; } }
+
+        // The list, not /releases/latest: a release can be for one platform only (v1.3.2 was Mac
+        // only), and GitHub's "latest" would then hide the newest Windows release.
+        public const string ListApi = "https://api.github.com/repos/" + Repo + "/releases?per_page=20";
 
         public class Release
         {
@@ -39,21 +43,40 @@ namespace Buzzcord
             return new Version(v.Major, v.Minor, Math.Max(0, v.Build), Math.Max(0, v.Revision));
         }
 
-        // Reads GET /repos/{repo}/releases/latest.
+        // Reads one release from GET /repos/{repo}/releases. Null for drafts, pre-releases and odd
+        // tags. ZipUrl and ShaUrl are only set for Buzzcord-<version>-windows.zip and its .sha256.
         public static Release ParseRelease(JObj j)
         {
             if (j == null || j.Bool("draft") || j.Bool("prerelease")) return null;
             var r = new Release { Tag = j.Str("tag_name"), Notes = j.Str("body"), PageUrl = j.Str("html_url") };
             r.Version = ParseTag(r.Tag);
             if (r.Version == null) return null;
+            string zipName = "Buzzcord-" + r.Tag.Trim().TrimStart('v', 'V') + "-windows.zip";
             foreach (var a in j.Objs("assets"))
             {
                 string name = a.Str("name") ?? "";
                 string url = a.Str("browser_download_url");
-                if (name.EndsWith("-windows.zip", StringComparison.OrdinalIgnoreCase)) r.ZipUrl = url;
-                else if (name.EndsWith("-windows.zip.sha256", StringComparison.OrdinalIgnoreCase)) r.ShaUrl = url;
+                if (string.Equals(name, zipName, StringComparison.OrdinalIgnoreCase)) r.ZipUrl = url;
+                else if (string.Equals(name, zipName + ".sha256", StringComparison.OrdinalIgnoreCase)) r.ShaUrl = url;
             }
             return r;
+        }
+
+        // The highest-version release with a Windows zip and its checksum, from the release list
+        // (or a single release object). GitHub lists by date, not version, so every entry is compared.
+        public static Release NewestForWindows(object feed)
+        {
+            var list = feed as List<object>;
+            if (list == null && feed is JObj) list = new List<object> { feed };
+            Release best = null;
+            if (list == null) return null;
+            foreach (var o in list)
+            {
+                var r = ParseRelease(o as JObj);
+                if (r == null || r.ZipUrl == null || r.ShaUrl == null) continue;
+                if (best == null || r.Version > best.Version) best = r;
+            }
+            return best;
         }
 
         static HttpClient Http()
@@ -64,14 +87,14 @@ namespace Buzzcord
             return c;
         }
 
-        // The latest release if it's newer than this copy (and has a Windows zip), else null.
+        // The newest release with a Windows zip if it's newer than this copy, else null.
         public static async Task<Release> Check()
         {
             using (var http = Http())
             {
-                string json = await http.GetStringAsync("https://api.github.com/repos/" + Repo + "/releases/latest").ConfigureAwait(false);
-                var r = ParseRelease(Json.ParseObj(json));
-                return r != null && r.Version > Current && r.ZipUrl != null ? r : null;
+                string json = await http.GetStringAsync(ListApi).ConfigureAwait(false);
+                var r = NewestForWindows(Json.Parse(json));
+                return r != null && r.Version > Current ? r : null;
             }
         }
 

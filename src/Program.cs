@@ -15,9 +15,9 @@ using Microsoft.Win32;
 [assembly: AssemblyDescription("A lightweight, old-school messenger for Discord")]
 [assembly: AssemblyCompany("Marc Turtal")]
 [assembly: AssemblyCopyright("Â© 2026 Marc Turtal")]
-[assembly: AssemblyVersion("1.3.1.0")]
-[assembly: AssemblyFileVersion("1.3.1.0")]
-[assembly: AssemblyInformationalVersion("1.3.1")]
+[assembly: AssemblyVersion("1.3.3.0")]
+[assembly: AssemblyFileVersion("1.3.3.0")]
+[assembly: AssemblyInformationalVersion("1.3.3")]
 
 namespace Buzzcord
 {
@@ -240,7 +240,7 @@ namespace Buzzcord
                 Settings.Set("UpdatedFrom", "");
                 Settings.Save();
                 Task.Run(() => Updater.CleanupOld(Shortcuts.BinDir));
-                BalloonAction(6000, "Buzzcord is up to date", "Updated to " + Program.Version + ". Click to see what's new.", () => Program.OpenUrl(Updater.ReleasesUrl + "/latest"));
+                BalloonAction(6000, "Buzzcord is up to date", "Updated to " + Program.Version + ". Click to see what's new.", () => Program.OpenUrl(Updater.ReleasesUrl + "/tag/v" + Program.Version));   // "latest" may be a Mac-only release
             }
 
             Start(background);

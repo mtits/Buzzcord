@@ -22,6 +22,13 @@ namespace Buzzcord
         public event DrawRowHandler DrawRow;
         public event Action<object, MouseEventArgs> RowClick;
         public event Action<object> RowActivate;     // double-click or Enter
+
+        // Clickable parts drawn inside a row (links like Accept / Ignore / Cancel). Asked first, on
+        // the mouse-down, with the row where it was drawn: true means the click was theirs, so the
+        // row isn't selected or scrolled (which would move the links out from under the pointer)
+        // and the double-click doesn't open the row.
+        public Func<object, MouseEventArgs, bool> RowAction;
+        bool actionDown;
         public event Action SelectionChanged;
 
         public RowList()
@@ -207,7 +214,9 @@ namespace Buzzcord
             base.OnMouseDown(e);
             Focus();
             int i = IndexAt(e.Location);
+            actionDown = false;
             if (i < 0) return;
+            if (e.Button == MouseButtons.Left && RowAction != null && RowAction(rows[i], e)) { actionDown = true; return; }
             Select(i);
             if (RowClick != null) RowClick(rows[i], e);
         }
@@ -215,6 +224,7 @@ namespace Buzzcord
         protected override void OnMouseDoubleClick(MouseEventArgs e)
         {
             base.OnMouseDoubleClick(e);
+            if (actionDown) return;
             int i = IndexAt(e.Location);
             if (i >= 0 && e.Button == MouseButtons.Left && RowActivate != null) RowActivate(rows[i]);
         }

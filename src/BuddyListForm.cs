@@ -102,21 +102,29 @@ namespace Buzzcord
             {
                 var row = (Row)r;
                 if (e.Button == MouseButtons.Right) { ShowRowMenu(row, e.Location); return; }
-                if (row.Kind == Kind.Pending)
-                {
-                    foreach (var link in PendingLinks(row, list.BoundsOf(row)))
-                        if (link.Key.Contains(e.Location)) { PendingAction(row.Id, link.Value); return; }
-                }
-                if (row.Kind == Kind.AddAction) { AddFriend(filter); return; }
                 if (row.Kind == Kind.Header || row.Kind == Kind.Guild) Toggle(row);
+            };
+            // Accept / Ignore / Cancel and "Add a Friend" are hit-tested before the row is selected:
+            // selecting can scroll the list or resize the activity card, which used to move the links
+            // away from the click so nothing happened. The action runs after the mouse-down is done,
+            // and the second click of a double-click is ignored (no second confirmation).
+            list.RowAction = (r, e) =>
+            {
+                var row = (Row)r;
+                string action = ActionAt(row, list.BoundsOf(row), e.Location);
+                if (action == null) return false;
+                if (e.Clicks == 1)
+                    BeginInvoke((Action)(() =>
+                    {
+                        if (action == "add") AddFriend(filter);
+                        else PendingAction(row.Id, action);
+                    }));
+                return true;
             };
             list.MouseMove += (s, e) =>
             {
-                bool hand = false;
                 var row = list.RowAt(e.Location) as Row;
-                if (row != null && row.Kind == Kind.Pending)
-                    foreach (var link in PendingLinks(row, list.BoundsOf(row))) if (link.Key.Contains(e.Location)) hand = true;
-                list.Cursor = hand || row != null && row.Kind == Kind.AddAction ? Cursors.Hand : Cursors.Default;
+                list.Cursor = row != null && ActionAt(row, list.BoundsOf(row), e.Location) != null ? Cursors.Hand : Cursors.Default;
             };
             list.RowActivate += r => Activate((Row)r);
             list.SelectionChanged += UpdateCard;
@@ -1111,20 +1119,52 @@ namespace Buzzcord
             return links;
         }
 
+        // What a click at p does on this row: "accept", "ignore", "cancel", "add", or null.
+        static string ActionAt(Row r, Rectangle bounds, Point p)
+        {
+            if (r.Kind == Kind.AddAction) return "add";
+            if (r.Kind != Kind.Pending) return null;
+            foreach (var link in PendingLinks(r, bounds))
+                if (link.Key.Contains(p)) return link.Value;
+            return null;
+        }
+
         async void PendingAction(string userId, string action)
         {
             string name = Session.NameOf(userId);
             try
             {
-                if (action == "accept") await Session.AddOrAcceptFriend(userId, "Friends");
+                if (action == "accept")
+                {
+                    await Session.AddOrAcceptFriend(userId, "Friends");
+                    state.Text = "You and " + name + " are now friends";
+                }
                 else
                 {
                     string q = action == "ignore" ? "Ignore " + name + "'s friend request?" : "Cancel your friend request to " + name + "?";
                     if (MessageBox.Show(this, q, "Buzzcord", MessageBoxButtons.OKCancel) != DialogResult.OK) return;
                     await Session.RemoveRelationship(userId, "Friends");
+                    state.Text = action == "ignore" ? "Ignored " + name + "'s friend request" : "Cancelled your friend request to " + name;
                 }
             }
-            catch (Exception ex) { MessageBox.Show(this, ex.Message, "Buzzcord"); }
+            catch (Exception ex)
+            {
+                Program.Log("friend request " + action + " " + userId + ": " + ex);
+                MessageBox.Show(this, FriendActionError(action, name, ex), "Buzzcord", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        // The message for a failed Accept / Ignore / Cancel. Public for the self-test.
+        public static string FriendActionError(string action, string name, Exception ex)
+        {
+            string what = action == "accept" ? "accept " + name + "'s friend request"
+                : action == "ignore" ? "ignore " + name + "'s friend request"
+                : "cancel your friend request to " + name;
+            var api = ex as ApiException;
+            string why = api != null && api.IsCaptcha ? "Discord asked for a captcha and it wasn't solved. Try again and finish the captcha."
+                : api != null && api.Status == 401 ? "Discord signed this account out. Sign in again."
+                : (ex.GetBaseException().Message ?? "unknown error");
+            return "Couldn't " + what + ".\n\n" + why;
         }
 
         public async void AddFriend(string prefill)

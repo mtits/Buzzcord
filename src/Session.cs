@@ -572,7 +572,15 @@ namespace Buzzcord
         public Task RemoveRelationship(string userId, string location)
         {
             removedByMe.Add(userId); // so the RELATIONSHIP_REMOVE that follows isn't reported as them unfriending you
-            return Api.SendWithContext(HttpMethod.Delete, "/users/@me/relationships/" + userId, null, location);
+            var ui = SynchronizationContext.Current;
+            var task = Api.SendWithContext(HttpMethod.Delete, "/users/@me/relationships/" + userId, null, location);
+            // If Discord refused, nothing was removed: forget it, or a real unfriend later would be missed.
+            task.ContinueWith(t =>
+            {
+                if (ui != null) ui.Post(_ => removedByMe.Remove(userId), null);
+                else removedByMe.Remove(userId);
+            }, TaskContinuationOptions.OnlyOnFaulted);
+            return task;
         }
 
         readonly HashSet<string> removedByMe = new HashSet<string>();
