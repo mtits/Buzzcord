@@ -21,6 +21,8 @@ enum MessageHtml {
     .me{color:var(--me);}
     .them{color:var(--them);}
     .sys{color:var(--sub);font-style:italic;}
+    .blk>summary{color:var(--sub);font-style:italic;cursor:pointer;}
+    .blk[open]>summary{margin-bottom:2px;}
     .rp{color:var(--sub);font-size:11px;margin-left:14px;}
     .ed{color:var(--sub);font-size:10px;}
     .act{display:none;position:absolute;right:2px;top:1px;background:var(--bg);border:1px solid var(--accentl);font-size:11px;padding:0 3px;}
@@ -100,6 +102,15 @@ enum MessageHtml {
     static func dayDivider(_ t: Date) -> String { "<div class=\"day\">" + e(dayFormat.string(from: t)) + "</div>" }
 
     static func render(_ s: Session, _ m: JObj) -> String {
+        let id = m.str("id") ?? ""
+        let authorId = m.obj("author")?.str("id")
+        // Like Discord: a blocked user's message is folded away, one click shows it.
+        guard s.isBlocked(authorId) else { return message(s, m, anchor: true) }
+        return "<div class=\"m\" id=\"m" + e(id) + "\"><details class=\"blk\"><summary>(" + e(timeFormat.string(from: Snowflake.time(id)))
+            + ") Blocked message</summary>" + message(s, m, anchor: false) + "</details></div>"
+    }
+
+    private static func message(_ s: Session, _ m: JObj, anchor: Bool) -> String {
         var sb = ""
         let id = m.str("id") ?? ""
         let author = m.obj("author")
@@ -109,12 +120,13 @@ enum MessageHtml {
         let type = Int(m.long("type"))
         let time = Snowflake.time(id)
 
-        sb += "<div class=\"m" + (mention ? " hl" : "") + "\" id=\"m" + e(id) + "\">"
+        sb += "<div class=\"m" + (mention ? " hl" : "") + "\"" + (anchor ? " id=\"m" + e(id) + "\"" : "") + ">"
 
         if let reference = m.obj("referenced_message") {
             var snippet = reference.str("content") ?? ""
             if snippet.count > 80 { snippet = String(snippet.prefix(80)) + "..." }
             if snippet.isEmpty { snippet = "(attachment)" }
+            if s.isBlocked(reference.obj("author")?.str("id")) { snippet = "(blocked message)" }
             sb += "<div class=\"rp\">&#8618; <b>" + e(s.name(reference.obj("author")?.str("id"))) + "</b> " + e(snippet) + "</div>"
         }
 
