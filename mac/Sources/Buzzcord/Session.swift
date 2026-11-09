@@ -340,6 +340,28 @@ final class Session: ObservableObject {
         try await api.send("DELETE", "/users/@me/relationships/\(userId)", nil, location: location)
     }
 
+    func isBlocked(_ userId: String?) -> Bool { userId.map { relationships[$0] == 2 } ?? false }
+
+    // Blocking a friend also unfriends them. Discord stops their DMs and calls; their messages in
+    // servers and group chats still arrive and Buzzcord hides them.
+    func block(_ userId: String, location: String) async throws {
+        noteRemovedByMe(userId)
+        try await api.send("PUT", "/users/@me/relationships/\(userId)", ["type": 2], location: location)
+    }
+
+    func unblock(_ userId: String, location: String) async throws {
+        try await api.send("DELETE", "/users/@me/relationships/\(userId)", nil, location: location)
+    }
+
+    // Takes a one-to-one chat off Recent chats, like the X in Discord's DM list. The messages stay,
+    // and it comes back with the next message. Never for a group: closing one means leaving it.
+    func closeDm(_ c: Channel) async throws {
+        guard c.isDm, privateChannels[c.id] != nil else { return }
+        try await api.send("DELETE", "/channels/\(c.id)", nil)
+        privateChannels.removeValue(forKey: c.id)
+        changed()
+    }
+
     // So the RELATIONSHIP_REMOVE that follows isn't reported as them unfriending you.
     func noteRemovedByMe(_ userId: String) { removedByMe.insert(userId) }
 
@@ -815,7 +837,7 @@ final class Session: ObservableObject {
         if let c = findChannel(cid) {
             c.lastMessageId = m.str("id")
             if let me, author?.str("id") == me.id { readStates[cid] = c.lastMessageId }
-            else if me != nil && (c.isPrivate ? !isMuted(c) : shouldNotifyMention(m)) { mentions[cid] = mentionCount(cid) + 1 }
+            else if me != nil && !isBlocked(author?.str("id")) && (c.isPrivate ? !isMuted(c) : shouldNotifyMention(m)) { mentions[cid] = mentionCount(cid) + 1 }
         } else if m.str("guild_id") == nil {
             // A DM channel we haven't seen yet.
             let ch = Channel()

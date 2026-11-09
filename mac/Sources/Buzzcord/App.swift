@@ -154,6 +154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let unread = messenger.addItem(withTitle: "Unread Messages", action: #selector(showUnread(_:)), keyEquivalent: "u")
         unread.keyEquivalentModifierMask = [.command, .shift]
         messenger.addItem(withTitle: "My Profile and Games...", action: #selector(AccountWindowController.showMyProfile(_:)), keyEquivalent: "")
+        messenger.addItem(withTitle: "Blocked Users...", action: #selector(AccountWindowController.showBlocked(_:)), keyEquivalent: "")
         messenger.addItem(.separator())
         let addAcct = messenger.addItem(withTitle: "Add Account...", action: #selector(addAccountMenu(_:)), keyEquivalent: "n")
         addAcct.keyEquivalentModifierMask = [.command, .shift]
@@ -569,7 +570,7 @@ final class AccountController {
             AutoSaver.consider(session, m)
             Archive.consider(session, m)
         }
-        guard !mine, let c = session.findChannel(cid) else { return }
+        guard !mine, !session.isBlocked(author?.str("id")), let c = session.findChannel(cid) else { return }
 
         let from = session.name(author?.str("id"))
         let title: String
@@ -653,6 +654,8 @@ class AccountWindowController: NSWindowController, NSMenuItemValidation {
     @objc func addFriend(_ sender: Any?) { addFriendNamed(nil) }
 
     @objc func showAlerts(_ sender: Any?) { if let a = account { AlertsWindowController.show(a) } }
+
+    @objc func showBlocked(_ sender: Any?) { if let a = account { BlockedWindowController.show(a) } }
 
     func addFriendNamed(_ initial: String?) {
         guard let s = accountSession else { return }

@@ -393,6 +393,16 @@ struct RowView: View {
     private var account: AccountController? { list.account }
 
     // Friend request buttons: logged, and a failure says why instead of doing nothing.
+    static func closeDm(_ session: Session, _ c: Channel) {
+        Log.write("recent: close \(c.id)")
+        Task { @MainActor in
+            do { try await session.closeDm(c) } catch {
+                Log.write("recent: close \(c.id) failed: \(error.localizedDescription)")
+                showError("Couldn't remove \(session.title(c)) from Recent chats: \(error.localizedDescription)")
+            }
+        }
+    }
+
     static func friendAction(_ session: Session, _ what: String, _ id: String, _ op: @escaping () async throws -> Void) {
         Log.write("friend: \(what) \(id)")
         Task { @MainActor in
@@ -433,11 +443,21 @@ struct RowView: View {
                 guard confirm("Remove \(session.name(id)) from your friends?", ok: "Remove") else { return }
                 Task { try? await session.removeRelationship(id, location: "Friends") }
             }
+            Button("Block...") { Blocking.block(session, id, location: "Friends") }
         case .dm(let c):
             Button("Send Instant Message") { account?.openChat(c) }
             if let id = c.recipientIds.first { Button("View Profile") { account?.showProfile(id, guildId: nil) } }
             pinButton(c)
             Button("Mark as Read") { session.markRead(c) }
+            // Only in Recent chats (Favorites rows start with "fav"), and not while it's pinned:
+            // closing the chat would take it out of Favorites too.
+            if row.id.hasPrefix("c") && !Favorites.isPinned(session, c.id) {
+                Button("Remove from Recent") { RowView.closeDm(session, c) }
+            }
+            if let id = c.recipientIds.first, !session.isBlocked(id), id != session.me?.id {
+                Divider()
+                Button("Block...") { Blocking.block(session, id, location: "DM Channel") }
+            }
         case .groupChat(let c), .channel(let c, _, _):
             Button("Open") { account?.openChat(c) }
             pinButton(c)
@@ -451,6 +471,8 @@ struct RowView: View {
             if incoming { Button("Accept") { RowView.friendAction(session, "accept", id) { try await session.addOrAcceptFriend(id, location: "Friends") } } }
             Button(incoming ? "Ignore" : "Cancel Request") { RowView.friendAction(session, incoming ? "ignore" : "cancel", id) { try await session.removeRelationship(id, location: "Friends") } }
             Button("View Profile") { account?.showProfile(id, guildId: nil) }
+            Divider()
+            Button("Block...") { Blocking.block(session, id, location: "Friends") }
         case .voiceUser(let id):
             Button("View Profile") { account?.showProfile(id, guildId: nil) }
         case .voice(let c, _):

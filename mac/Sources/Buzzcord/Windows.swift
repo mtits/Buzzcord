@@ -388,7 +388,7 @@ struct ProfileView: View {
                 if let e = model.error { Text(e).font(.system(size: 11)).foregroundStyle(Theme.sub).padding(.horizontal, 14) }
                 HStack {
                     if userId != session.me?.id {
-                        Button("Send IM") { account.openChat(userId: userId) }
+                        if rel != 2 { Button("Send IM") { account.openChat(userId: userId) } }
                         switch rel {
                         case 1: Button("Remove Friend") {
                             if confirm("Remove \(session.name(userId)) from your friends?", ok: "Remove") {
@@ -397,7 +397,7 @@ struct ProfileView: View {
                         }
                         case 3: Button("Accept Request") { Task { try? await session.addOrAcceptFriend(userId, location: "User Profile") } }
                         case 4: Button("Cancel Request") { Task { try? await session.removeRelationship(userId, location: "User Profile") } }
-                        case 2: EmptyView()
+                        case 2: Button("Unblock") { Blocking.unblock(session, userId, location: "User Profile") }
                         default: Button("Add Friend") {
                             Task {
                                 do { try await session.addOrAcceptFriend(userId, location: "User Profile") }
@@ -405,6 +405,8 @@ struct ProfileView: View {
                             }
                         }
                         }
+                        Spacer()
+                        if rel != 2 { Button("Block...") { Blocking.block(session, userId, location: "User Profile") } }
                     }
                 }
                 .padding(14)

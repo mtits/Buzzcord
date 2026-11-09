@@ -5,6 +5,7 @@ import CryptoKit
 // Hidden checks, run from the command line:
 //   Buzzcord --demo            buddy list and a chat window filled with made-up data (no sign-in)
 //   Buzzcord --gateway-test    connects with a fake token; passes if Discord rejects it with 4004
+//   --demo --blocked           a blocked user in the group chat, and Messenger > Blocked Users
 //   --demo --notice / --login / --about   also show the first-run notice (saves nothing), the
 //                              sign-in window and the About box
 @MainActor
@@ -108,6 +109,16 @@ enum Demo {
             UNUserNotificationCenter.current().getNotificationCategories { cats in
                 Log.write("banner actions: " + cats.flatMap { c in c.actions.map { "\(c.identifier)/\($0.title)" } }.joined(separator: ", "))
             }
+        }
+        if CommandLine.arguments.contains("--blocked") {
+            // A blocked user ("zed") talking in the group chat, and the Blocked Users window.
+            let zed = id(7)
+            s.inject("RELATIONSHIP_ADD", ["id": zed, "type": 2, "user": user(zed, "zed", "Zed")])
+            let g = a.openChat(s.findChannel(group)!)
+            g.add(["id": id(36), "channel_id": group, "author": ["id": zed, "username": "zed"], "content": "anyone up for a 1v1", "type": 0])
+            g.add(["id": id(37), "channel_id": group, "author": ["id": ben], "content": "nope", "type": 0,
+                   "referenced_message": ["id": id(36), "author": ["id": zed], "content": "anyone up for a 1v1"]])
+            BlockedWindowController.show(a)
         }
         if CommandLine.arguments.contains("--playing") {
             GameDetector.demo = true
