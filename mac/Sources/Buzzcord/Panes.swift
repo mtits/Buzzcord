@@ -244,6 +244,8 @@ final class AlertHistory: ObservableObject {
 @MainActor
 final class AlertsWindowController: NSWindowController, NSWindowDelegate {
     private static var open: [String: AlertsWindowController] = [:]
+    // --demo --alerts: the mentions inbox, newest first, instead of asking Discord.
+    static var demoMentions: [JObj]?
     private let account: AccountController
     private let pane = HtmlPane()
     private let model = PaneModel()
@@ -251,7 +253,8 @@ final class AlertsWindowController: NSWindowController, NSWindowDelegate {
     private var noMore = false
     private var loading = false
     private var watch: Any?
-    private var shownCount = -1
+    private var shownNewest: Date?   // the newest history entry on screen
+    private var shownAny = false
 
     static func show(_ account: AccountController) {
         let key = account.session.tokenKey
@@ -276,15 +279,13 @@ final class AlertsWindowController: NSWindowController, NSWindowDelegate {
         w.center()
         pane.onLink = { [weak self] a, arg in
             guard let self else { return }
-            if a == "more" { self.pane.call("removeMsg", "more"); self.loadMentions(); return }
+            if a == "more" { self.loadMentions(); return }
             _ = HtmlPane.standard(self.account, a, arg, guildId: nil)
         }
-        // Redraw when an alert comes in (not when they're only marked seen, so new ones stay highlighted).
+        // When an alert comes in, add it at the bottom (not when they're only marked seen, so new
+        // ones stay highlighted). The page only scrolls down if you were already at the bottom.
         watch = account.alerts.objectWillChange.sink { [weak self] _ in
-            DispatchQueue.main.async {
-                guard let self, self.model.tab == 1, self.account.alerts.entries.count != self.shownCount else { return }
-                self.showHistory()
-            }
+            DispatchQueue.main.async { if let self, self.model.tab == 1 { self.historyChanged() } }
         }
         select(account.alerts.unseen > 0 ? 1 : 0)
     }
@@ -311,54 +312,98 @@ final class AlertsWindowController: NSWindowController, NSWindowDelegate {
         guard !loading, !noMore else { return }
         loading = true
         model.status = "Loading mentions..."
+        if oldest != nil { pane.call("setOlder", "Loading...") }
         let s = account.session
         let path = "/users/@me/mentions?limit=25&roles=true&everyone=true" + (oldest.map { "&before=\($0)" } ?? "")
         Task {
             defer { loading = false }
             do {
-                let list = try await s.api.get(path) as? [Any] ?? []
-                guard model.tab == 0 else { return }
-                var html = ""
-                let f = DateFormatter()
-                f.dateFormat = "MMM d, h:mm a"
-                var n = 0
-                for case let m as JObj in list {
-                    n += 1
-                    oldest = m.str("id")
-                    let c = s.findChannel(m.str("channel_id"))
-                    html += "<div class=\"day\" style=\"text-align:left\">" + MessageHtml.e(c.map { s.title($0) } ?? "a channel you can't see")
-                        + " &middot; " + MessageHtml.e(f.string(from: Snowflake.time(m.str("id"))))
-                    if let c { html += " &middot; <a href=\"app://channel/" + MessageHtml.e(c.id) + "\">open chat</a>" }
-                    html += "</div>" + MessageHtml.render(s, m)
+                let list: [Any]
+                if let demo = AlertsWindowController.demoMentions {
+                    list = Array(demo.filter { oldest == nil || Snowflake.compare($0.str("id"), oldest) < 0 }.prefix(25))
+                } else {
+                    list = try await s.api.get(path) as? [Any] ?? []
                 }
-                if n < 25 { noMore = true }
-                pane.call("append", html)
-                if !noMore { pane.call("append", "<div id=\"more\" style=\"text-align:center;margin:8px\"><a href=\"app://more/\">Show older mentions</a></div>") }
-                model.status = oldest == nil ? "No mentions. Nice and quiet." : "Mentions from Discord's inbox, newest first."
+                guard model.tab == 0 else { return }
+                let page = list.compactMap { $0 as? JObj }
+                let first = oldest == nil
+                if let last = page.last?.str("id") { oldest = last }
+                if page.count < 25 { noMore = true }
+                // Discord sends newest first; the page shows them like a chat, newest at the
+                // bottom. Older pages go in above, keeping your place.
+                // The link first, so the first page still lands exactly at the bottom.
+                pane.call("setOlder", noMore ? (first ? "" : "<span class=\"t\">No older mentions.</span>") : "<a href=\"app://more/\">Show older mentions</a>")
+                pane.call(first ? "append" : "prepend", AlertsWindowController.mentionsHtml(s, page))
+                model.status = oldest == nil ? "No mentions. Nice and quiet." : "Mentions from Discord's inbox, newest at the bottom."
             } catch {
                 model.status = error.localizedDescription
             }
         }
     }
 
+    // The whole history, oldest at the top and newest at the bottom, opened at the bottom.
     private func showHistory() {
         pane.clear()
         let list = account.alerts.entries
-        shownCount = list.count
+        shownNewest = list.first?.time
+        shownAny = !list.isEmpty
+        pane.call("append", AlertsWindowController.historyHtml(list))
+        historyStatus()
+        DispatchQueue.main.async { self.account.alerts.markSeen() }
+    }
+
+    // New alerts go at the bottom without redrawing the rest. Cleared: start over.
+    private func historyChanged() {
+        let list = account.alerts.entries
+        if list.isEmpty { if shownAny { showHistory() }; return }
+        guard let newest = shownNewest else { showHistory(); return }
+        let fresh = list.prefix { $0.time > newest }
+        guard !fresh.isEmpty else { return }
+        shownNewest = list.first?.time
+        shownAny = true
+        pane.call("append", AlertsWindowController.historyHtml(Array(fresh)))
+        historyStatus()
+        DispatchQueue.main.async { self.account.alerts.markSeen() }
+    }
+
+    private func historyStatus() {
+        let n = account.alerts.entries.count
+        model.status = n == 0 ? "Nothing yet. Alerts Buzzcord shows you will be listed here." : "\(n) alert\(n == 1 ? "" : "s"), newest at the bottom."
+    }
+
+    private static func stamp(_ d: Date) -> String {
         let f = DateFormatter()
         f.dateFormat = "MMM d, h:mm a"
+        return f.string(from: d)
+    }
+
+    // History entries as HTML. `entries` is newest first, as AlertHistory keeps them (and saves
+    // them); the page shows them oldest first, like a chat log. Unseen ones are highlighted.
+    static func historyHtml(_ entries: [AlertEntry]) -> String {
         var html = ""
-        for a in list {
-            html += "<div class=\"m" + (a.seen ? "" : " hl") + "\"><span class=\"t\">(" + MessageHtml.e(f.string(from: a.time)) + ")</span> "
-                + AlertsWindowController.label(a.kind) + " <b>" + MessageHtml.e(a.title) + "</b>"
+        for a in entries.reversed() {
+            html += "<div class=\"m" + (a.seen ? "" : " hl") + "\"><span class=\"t\">(" + MessageHtml.e(stamp(a.time)) + ")</span> "
+                + label(a.kind) + " <b>" + MessageHtml.e(a.title) + "</b>"
             if !a.text.isEmpty { html += ": " + MessageHtml.e(a.text) }
             if let c = a.channel, !c.isEmpty { html += " <a href=\"app://channel/" + MessageHtml.e(c) + "\">open</a>" }
             else if let u = a.user { html += " <a href=\"app://profile/" + MessageHtml.e(u) + "\">profile</a>" }
             html += "</div>"
         }
-        pane.call("append", html)
-        model.status = list.isEmpty ? "Nothing yet. Alerts Buzzcord shows you will be listed here." : "\(list.count) alert\(list.count == 1 ? "" : "s"), newest first."
-        DispatchQueue.main.async { self.account.alerts.markSeen() }
+        return html
+    }
+
+    // One page of Discord's mentions inbox (newest first, as Discord sends it) as HTML, oldest
+    // first.
+    static func mentionsHtml(_ s: Session, _ page: [JObj]) -> String {
+        var html = ""
+        for m in page.reversed() {
+            let c = s.findChannel(m.str("channel_id"))
+            html += "<div class=\"day\" style=\"text-align:left\">" + MessageHtml.e(c.map { s.title($0) } ?? "a channel you can't see")
+                + " &middot; " + MessageHtml.e(stamp(Snowflake.time(m.str("id"))))
+            if let c { html += " &middot; <a href=\"app://channel/" + MessageHtml.e(c.id) + "\">open chat</a>" }
+            html += "</div>" + MessageHtml.render(s, m)
+        }
+        return html
     }
 
     static func label(_ k: AlertKind) -> String {

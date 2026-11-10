@@ -6,6 +6,8 @@ import CryptoKit
 //   Buzzcord --demo            buddy list and a chat window filled with made-up data (no sign-in)
 //   Buzzcord --gateway-test    connects with a fake token; passes if Discord rejects it with 4004
 //   --demo --blocked           a blocked user in the group chat, and Messenger > Blocked Users
+//   --demo --alerts            40 mentions and 40 more alerts, and a new one after 20 s, to check
+//                              the newest-at-the-bottom order
 //   --demo --attach            files in the DM window's tray, and one over the limit (not attached)
 //   --demo --notice / --login / --about   also show the first-run notice (saves nothing), the
 //                              sign-in window and the About box
@@ -143,6 +145,19 @@ enum Demo {
         if CommandLine.arguments.contains("--attach") { attachSamples(chat) }
         a.openChat(s.findChannel(group)!, activate: false)
         a.alerts.clear()
+        if CommandLine.arguments.contains("--alerts") {
+            // Mention n is n minutes old; Discord sends the inbox newest first.
+            AlertsWindowController.demoMentions = (1...40).map { n in
+                ["id": id(60 - Int64(n)), "channel_id": general, "author": ["id": [alyssa, ben, dina][n % 3]], "content": "@Marc mention number \(41 - n)", "type": 0] as JObj
+            }
+            for n in (1...40).reversed() {
+                a.alerts.record(AlertEntry(time: Date().addingTimeInterval(Double(-900 - n * 60)), kind: .signIn, title: "Alert \(41 - n)", text: "older history entry", user: ben))
+            }
+            // A new alert 20 s in: it goes at the bottom, without scrolling you there if you'd scrolled up.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 20) {
+                a.alerts.record(AlertEntry(time: Date(), kind: .friendRequest, title: "Carlo", text: "sent you a friend request.", user: carlo))
+            }
+        }
         a.alerts.record(AlertEntry(time: Date().addingTimeInterval(-600), kind: .signIn, title: "Ben", text: "signed in.", user: ben))
         a.alerts.record(AlertEntry(time: Date().addingTimeInterval(-300), kind: .mention, title: "Dina in #general (PH Gamers)", text: "@Marc are you joining later?", channel: general))
         a.alerts.record(AlertEntry(time: Date(), kind: .message, title: "Alyssa", text: "you on tonight?", channel: dm))

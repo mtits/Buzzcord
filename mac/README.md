@@ -39,7 +39,7 @@ Hidden checks: `Buzzcord.app/Contents/MacOS/Buzzcord --demo` opens the windows w
 - Files sent in DMs and group chats are saved to `Documents/Buzzcord Saved/<account>/<chat>`, and their text goes into `Chat log.txt` there (Options menu to turn either off or change the folder; Conversation > Open Saved Files).
 - Member sidebar in server channels (Discord's member list: role groups, role colours, what people are playing) and group chats. Conversation > Show Members hides it.
 - Message search (Cmd+F in a chat window, or Conversation > Search Messages) uses Discord's own search, so it finds old messages; "Whole server" searches every channel.
-- Mentions & notifications (Shift+Cmd+M, or Mentions in the buddy list): Discord's mentions inbox, and a saved history of every alert Buzzcord showed.
+- Mentions & notifications (Shift+Cmd+M, or Mentions in the buddy list): Discord's mentions inbox, and a saved history of every alert Buzzcord showed. Both read like a chat: newest at the bottom, older mentions loading above as you scroll up.
 - Voice calls (no video):
   - **Server voice channels:** double-click one in the buddy list to join.
   - **DMs and group chats:** the Call button (Shift+Cmd+K) rings them. Incoming calls show a ringing window with Answer and Ignore.
