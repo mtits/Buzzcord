@@ -6,6 +6,9 @@ import CryptoKit
 //   Buzzcord --demo            buddy list and a chat window filled with made-up data (no sign-in)
 //   Buzzcord --gateway-test    connects with a fake token; passes if Discord rejects it with 4004
 //   --demo --blocked           a blocked user in the group chat, and Messenger > Blocked Users
+//   --demo --alerts            40 mentions and 40 more alerts, and a new one after 20 s, to check
+//                              the newest-at-the-bottom order
+//   --demo --attach            files in the DM window's tray, and one over the limit (not attached)
 //   --demo --notice / --login / --about   also show the first-run notice (saves nothing), the
 //                              sign-in window and the About box
 @MainActor
@@ -49,7 +52,7 @@ enum Demo {
         func user(_ i: String, _ name: String, _ global: String?) -> JObj { ["id": i, "username": name, "global_name": global ?? JNull, "avatar": JNull, "discriminator": "0"] }
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         let ready: JObj = [
-            "user": user(me, "marc", "Marc"),
+            "user": user(me, "marc", "Marc").merging(["premium_type": 0]) { $1 },
             "users": [user(alyssa, "alyssa", "Alyssa"), user(ben, "ben", "Ben"), user(dina, "dina", "Dina"), user(xenia, "xenia", "♡ Xenia ♡"), user(carlo, "carlo", "Carlo")],
             "relationships": [["id": alyssa, "type": 1], ["id": ben, "type": 1], ["id": dina, "type": 1], ["id": xenia, "type": 1], ["id": carlo, "type": 3]],
             "private_channels": [
@@ -139,12 +142,65 @@ enum Demo {
         chat.add(msg(34, alyssa, "I know right `ez`", ["referenced_message": ["author": ["id": me], "content": "that ace was insane"]]))
         chat.add(msg(40, alyssa, "you on tonight? ||it's a surprise||", ["edited_timestamp": "2026-11-03T00:00:00Z"]))
         s.onTyping?(dm, alyssa)
+        if CommandLine.arguments.contains("--attach") { attachSamples(chat) }
         a.openChat(s.findChannel(group)!, activate: false)
         a.alerts.clear()
+        if CommandLine.arguments.contains("--alerts") {
+            // Mention n is n minutes old; Discord sends the inbox newest first.
+            AlertsWindowController.demoMentions = (1...40).map { n in
+                ["id": id(60 - Int64(n)), "channel_id": general, "author": ["id": [alyssa, ben, dina][n % 3]], "content": "@Marc mention number \(41 - n)", "type": 0] as JObj
+            }
+            for n in (1...40).reversed() {
+                a.alerts.record(AlertEntry(time: Date().addingTimeInterval(Double(-900 - n * 60)), kind: .signIn, title: "Alert \(41 - n)", text: "older history entry", user: ben))
+            }
+            // A new alert 20 s in: it goes at the bottom, without scrolling you there if you'd scrolled up.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 20) {
+                a.alerts.record(AlertEntry(time: Date(), kind: .friendRequest, title: "Carlo", text: "sent you a friend request.", user: carlo))
+            }
+        }
         a.alerts.record(AlertEntry(time: Date().addingTimeInterval(-600), kind: .signIn, title: "Ben", text: "signed in.", user: ben))
         a.alerts.record(AlertEntry(time: Date().addingTimeInterval(-300), kind: .mention, title: "Dina in #general (PH Gamers)", text: "@Marc are you joining later?", channel: general))
         a.alerts.record(AlertEntry(time: Date(), kind: .message, title: "Alyssa", text: "you on tonight?", channel: dm))
         AlertsWindowController.show(a)
+    }
+
+    // Sample files for the attachment tray: an animated GIF, a PNG, a text file, a 19 MB file
+    // (close to the free limit) and an 84 MB "video" that isn't attached. The big ones are
+    // sparse files, so they take no disk space. Nothing is sent.
+    private static func attachSamples(_ chat: ChatWindowController) {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("Buzzcord/demo-attach", isDirectory: true)
+        try? FileManager.default.removeItem(at: dir)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        func frame(_ color: NSColor, _ text: String) -> CGImage? {
+            let img = NSImage(size: NSSize(width: 96, height: 96), flipped: false) { r in
+                color.setFill(); r.fill()
+                let t = NSAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: 56)])
+                t.draw(at: NSPoint(x: (r.width - t.size().width) / 2, y: (r.height - t.size().height) / 2))
+                return true
+            }
+            return img.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        }
+        let gif = dir.appendingPathComponent("dance.gif")
+        if let dest = CGImageDestinationCreateWithURL(gif as CFURL, "com.compuserve.gif" as CFString, 3, nil) {
+            CGImageDestinationSetProperties(dest, [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0]] as CFDictionary)
+            for (c, t) in [(NSColor.systemPink, "💃"), (.systemTeal, "🕺"), (.systemYellow, "🎉")] {
+                if let f = frame(c, t) { CGImageDestinationAddImage(dest, f, [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: 0.3]] as CFDictionary) }
+            }
+            CGImageDestinationFinalize(dest)
+        }
+        let png = dir.appendingPathComponent("screenshot.png")
+        if let f = frame(.systemPurple, "🏆") { try? NSBitmapImageRep(cgImage: f).representation(using: .png, properties: [:])?.write(to: png) }
+        let txt = dir.appendingPathComponent("notes.txt")
+        try? "Squad schedule".write(to: txt, atomically: true, encoding: .utf8)
+        func sparse(_ name: String, _ bytes: Int64) -> URL {
+            let u = dir.appendingPathComponent(name)
+            FileManager.default.createFile(atPath: u.path, contents: nil)
+            if let h = try? FileHandle(forWritingTo: u) { try? h.truncate(atOffset: UInt64(bytes)); try? h.close() }
+            return u
+        }
+        let zip = sparse("replays.zip", 19 * UploadLimits.mb)
+        let mov = sparse("clip.mov", 84 * UploadLimits.mb)
+        chat.addFiles([gif, png, txt, zip, mov])
     }
 
     // Offline checks of the call plumbing: RTP transport encryption, Opus through the jitter
