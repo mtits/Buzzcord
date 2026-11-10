@@ -55,6 +55,11 @@ namespace Buzzcord
             Check("Blocking: blocking a friend yourself isn't an unfriend alert", BlockNoAlertTest);
             Check("Blocking: blocked messages are folded and don't count", BlockedMessagesTest);
             Check("Remove from Recent: one-to-one chats only", RemoveFromRecentTest);
+            Check("Mentions & notifications: newest at the bottom", AlertsOrderTest);
+            Check("Uploads: Discord's limits by Nitro and server boost", UploadLimitsTest);
+            Check("Uploads: what Buzzcord says about the limit", UploadMessagesTest);
+            Check("Uploads: attaching within the limit, 10 files at most", UploadCheckTest);
+            Check("Paste: files, text, and pictures in their own format (GIF stays GIF)", PasteTest);
             Check("Updates: swapping files and rolling back", UpdateApplyTest);
             Check("Donate QR codes", DonateQrTest);
             Check("Shortcut and startup command", LaunchCommandTest);
@@ -120,6 +125,72 @@ namespace Buzzcord
             string back = Json.Write(o);
             Assert(Json.Write(Json.ParseObj(back)) == back, "stable output");
             return back.Length + " chars";
+        }
+
+        // Discord's inbox (40 mentions, newest first) from a stand-in: the first page lands at the
+        // bottom, newest last, and "Show older mentions" puts the next page above it.
+        static void RenderMentions(Session s, BuddyListForm list, string dir)
+        {
+            var all = new List<object>();
+            for (int i = 40; i >= 1; i--)
+                all.Add(Json.O("id", (1300000000000000000L + i * 1000000000000L).ToString(), "channel_id", "911", "type", 0L,
+                    "content", "@Marc mention number " + i.ToString("00"), "mentions", new List<object> { Json.O("id", "100") }, "author", Json.O("id", i % 2 == 0 ? "200" : "201")));
+            AlertsForm.MentionsForTest = before =>
+            {
+                var page = new List<object>();
+                foreach (JObj m in all) if ((before == null || Snowflake.Compare(m.Str("id"), before) < 0) && page.Count < 25) page.Add(m);
+                return page;
+            };
+            var f = new AlertsForm(s, list) { StartPosition = FormStartPosition.Manual, Location = new Point(360, 80) };
+            try
+            {
+                f.Show();
+                Pump(1500);
+                f.ShowMentionsTab();
+                Pump(1500);
+                string text = f.PageText();
+                Assert(text.IndexOf("mention number 16") >= 0 && text.IndexOf("mention number 16") < text.IndexOf("mention number 40"), "first page should read oldest to newest");
+                Assert(text.IndexOf("mention number 15") < 0 && text.TrimStart().StartsWith("Show older mentions"), "the older link sits at the top");
+                Capture(f, Path.Combine(dir, "alerts-mentions.png"));
+                f.LoadOlderMentions();
+                Pump(1200);
+                text = f.PageText();
+                Assert(text.TrimStart().StartsWith("No older mentions."), "after the last page: " + text.Substring(0, Math.Min(80, text.Length)));
+                int a = text.IndexOf("mention number 01"), b = text.IndexOf("mention number 15"), c = text.IndexOf("mention number 16"), d = text.IndexOf("mention number 40");
+                Assert(a >= 0 && a < b && b < c && c < d, "the older page should go in above, oldest first");
+            }
+            finally
+            {
+                AlertsForm.MentionsForTest = null;
+                f.Close();
+            }
+        }
+
+        // The strip above the message box: a picture, a file near the limit, and one over it
+        // (refused, with the note).
+        static void RenderAttachments(ChatForm chat, string dir)
+        {
+            string tmp = Path.Combine(Path.GetTempPath(), "Buzzcord-selftest-attach");
+            Directory.CreateDirectory(tmp);
+            string pic = Path.Combine(tmp, "screenshot.png"), near = Path.Combine(tmp, "gameplay clip.mp4"), big = Path.Combine(tmp, "full match.mp4");
+            using (var bmp = new Bitmap(64, 48))
+            {
+                using (var g = Graphics.FromImage(bmp)) using (var br = new System.Drawing.Drawing2D.LinearGradientBrush(new Rectangle(0, 0, 64, 48), Color.MediumPurple, Color.Orange, 30f)) g.FillRectangle(br, 0, 0, 64, 48);
+                bmp.Save(pic, System.Drawing.Imaging.ImageFormat.Png);
+            }
+            using (var fs = File.Create(near)) fs.SetLength(19 * UploadLimits.MB);
+            using (var fs = File.Create(big)) fs.SetLength(84 * UploadLimits.MB);
+            try
+            {
+                chat.AttachForTest(new[] { pic, near, big });
+                Pump(800);
+                Capture(chat, Path.Combine(dir, "chat-attach.png"));
+            }
+            finally
+            {
+                chat.ClearAttachmentsForTest();
+                foreach (var f in new[] { pic, near, big }) try { File.Delete(f); } catch (Exception) { }
+            }
         }
 
         static Session FakeSession()
@@ -699,6 +770,206 @@ namespace Buzzcord
             return null;
         }
 
+        // Mentions & notifications read like a chat log. Mirrors mac/Tests/BuzzcordTests/AlertsOrderTests.swift.
+        static string AlertsOrderTest()
+        {
+            var now = DateTime.Now;
+            // Notifier keeps (and saves) them newest first.
+            var entries = new List<AlertEntry> {
+                new AlertEntry { Time = now, Kind = AlertKind.Message, Title = "Newest", Text = "c", ChannelId = "10" },
+                new AlertEntry { Time = now.AddMinutes(-1), Kind = AlertKind.Mention, Title = "Middle", Text = "b", ChannelId = "11", Seen = true },
+                new AlertEntry { Time = now.AddMinutes(-2), Kind = AlertKind.SignIn, Title = "Oldest", Text = "a", UserId = "2", Seen = true } };
+            string h = AlertsForm.HistoryHtml(entries);
+            int o = h.IndexOf("Oldest"), m = h.IndexOf("Middle"), n = h.IndexOf("Newest");
+            Assert(o >= 0 && o < m && m < n, "history should read oldest to newest: " + h);
+            int hl = h.IndexOf("class=\"m hl\"");
+            Assert(hl > m && hl == h.LastIndexOf("class=\"m hl\""), "only the unseen (newest) entry is highlighted");
+            Assert(AlertsForm.HistoryHtml(new List<AlertEntry>()) == "", "empty history");
+            Assert(entries[0].Title == "Newest", "showing them doesn't change the stored order");
+
+            var s = FakeSession();
+            Func<string, string, JObj> mention = (id, text) => Json.O("id", id, "channel_id", "911", "type", 0L, "content", text, "author", Json.O("id", "200", "username", "alyssa"));
+            // Discord's inbox sends newest first.
+            var page = new List<JObj> { mention("1300000000000000300", "third mention"), mention("1300000000000000200", "second mention"), mention("1300000000000000100", "first mention") };
+            string p = AlertsForm.MentionsHtml(s, page);
+            int a = p.IndexOf("first mention"), b = p.IndexOf("second mention"), c = p.IndexOf("third mention");
+            Assert(a >= 0 && a < b && b < c, "a mentions page should read oldest to newest: " + p);
+            Assert(p.Contains("app://channel/911"), "open chat link");
+            // The page script puts an older page above and keeps your place; append follows the
+            // bottom only when you're already there (the same rule as IM windows).
+            Assert(MessageHtml.Page.Contains("function prepend(") && MessageHtml.Page.Contains("function setOlder(") && MessageHtml.Page.Contains("if(s){bottom();"), "page script");
+            return null;
+        }
+
+        // A session whose own account and one server can be set up for the upload limit.
+        static Session UploadSession(int premiumType, int premiumTier)
+        {
+            var s = new Session("MTIzNDU2Nzg5.upload.test");
+            s.Inject("READY", Json.O(
+                "session_id", "x",
+                "user", Json.O("id", "1", "username", "me", "premium_type", (long)premiumType),
+                "private_channels", new List<object> { Json.O("id", "10", "type", 1L, "recipient_ids", new List<object> { "2" }), Json.O("id", "11", "type", 3L, "recipient_ids", new List<object> { "2", "3" }) },
+                "guilds", new List<object> { Json.O("id", "20", "properties", Json.O("name", "G", "owner_id", "9", "premium_tier", (long)premiumTier),
+                    "roles", new List<object> { Json.O("id", "20", "permissions", "1071698660929", "position", 0L) },
+                    "channels", new List<object> { Json.O("id", "21", "type", 0L, "name", "general", "position", 0L) }) }));
+            return s;
+        }
+
+        static string UploadLimitsTest()
+        {
+            const long MB = UploadLimits.MB;
+            Assert(MB == 1048576 && UploadLimits.Free == 20971520, "MB means MiB, 20 MB = 20,971,520 bytes");
+            Assert(UploadLimits.Account(0) == 20 * MB && UploadLimits.Account(1) == 50 * MB && UploadLimits.Account(2) == 1024 * MB
+                && UploadLimits.Account(3) == 50 * MB && UploadLimits.Account(7) == 20 * MB, "account limits by premium_type");
+            Assert(UploadLimits.Server(0) == 20 * MB && UploadLimits.Server(1) == 20 * MB && UploadLimits.Server(2) == 50 * MB && UploadLimits.Server(3) == 100 * MB, "server limits by boost level");
+            // DMs and group chats: the account's own limit, whatever servers you're in.
+            Assert(UploadLimits.Effective(0, null) == 20 * MB && UploadLimits.Effective(3, null) == 50 * MB && UploadLimits.Effective(2, null) == 1024 * MB, "DM limits");
+            // Servers: the larger of the two.
+            Assert(UploadLimits.Effective(0, 0) == 20 * MB && UploadLimits.Effective(0, 1) == 20 * MB, "unboosted server");
+            Assert(UploadLimits.Effective(0, 2) == 50 * MB && UploadLimits.Effective(0, 3) == 100 * MB, "boosted server, no Nitro");
+            Assert(UploadLimits.Effective(3, 2) == 50 * MB && UploadLimits.Effective(3, 3) == 100 * MB && UploadLimits.Effective(2, 3) == 1024 * MB, "boosted server with Nitro");
+            Assert(UploadLimits.MaxFiles == 10, "10 files per message");
+
+            // Read from READY, USER_UPDATE and GUILD_UPDATE.
+            var s = UploadSession(3, 2);
+            Assert(s.UploadContextFor(s.FindChannel("10")).Limit == 50 * MB && s.UploadContextFor(s.FindChannel("10")).GuildTier == null, "Nitro Basic DM");
+            Assert(s.UploadContextFor(s.FindChannel("11")).Limit == 50 * MB, "Nitro Basic group chat");
+            Assert(s.UploadContextFor(s.FindChannel("21")).Limit == 50 * MB && s.UploadContextFor(s.FindChannel("21")).GuildTier == 2, "Level 2 server");
+            s.Inject("USER_UPDATE", Json.O("id", "1", "username", "me", "premium_type", 0L));
+            Assert(s.UploadContextFor(s.FindChannel("10")).Limit == 20 * MB, "Nitro ended: 20 MB in DMs");
+            Assert(s.UploadContextFor(s.FindChannel("21")).Limit == 50 * MB, "the server's boost still gives 50 MB there");
+            s.Inject("GUILD_UPDATE", Json.O("id", "20", "name", "G", "premium_tier", 3L));
+            Assert(s.UploadContextFor(s.FindChannel("21")).Limit == 100 * MB, "Level 3 from GUILD_UPDATE");
+            s.Inject("USER_UPDATE", Json.O("id", "1", "premium_type", 2L));
+            Assert(s.UploadContextFor(s.FindChannel("21")).Limit == 1024 * MB && s.UploadContextFor(s.FindChannel("10")).Limit == 1024 * MB, "Nitro: 1 GB everywhere");
+            Assert(UploadSession(0, 0).UploadContextFor(UploadSession(0, 0).FindChannel("21")).Limit == 20 * MB, "unboosted, no Nitro");
+            return null;
+        }
+
+        static string UploadMessagesTest()
+        {
+            const long MB = UploadLimits.MB;
+            Func<int, int?, UploadContext> ctx = (p, t) => new UploadContext { PremiumType = p, GuildTier = t };
+            Action<string, string> eq = (got, want) => Assert(got == want, "got \"" + got + "\", want \"" + want + "\"");
+            eq(Uploads.Size(84 * MB), "84 MB");
+            eq(Uploads.Size((long)(9.6 * MB)), "9.6 MB");
+            eq(Uploads.Size(820 * 1024), "820 KB");
+            eq(Uploads.Size(1024 * MB), "1 GB");
+            eq(Uploads.Size(20 * MB + 10486, true), "20.1 MB");
+            eq(Uploads.Size(150 * MB), "150 MB");
+            eq(Uploads.TooBig("clip.mov", 84 * MB, ctx(0, null)), "clip.mov is 84 MB. You can send up to 20 MB here (50 MB with Nitro Basic or 1 GB with Nitro).");
+            eq(Uploads.TooBig("clip.mov", 84 * MB, ctx(0, 0)), "clip.mov is 84 MB. You can send up to 20 MB here (50 MB with Nitro Basic, 1 GB with Nitro, or 50-100 MB in a boosted server).");
+            eq(Uploads.TooBig("clip.mov", 84 * MB, ctx(0, 2)), "clip.mov is 84 MB. You can send up to 50 MB in this server, thanks to its Level 2 boost (1 GB with Nitro or 100 MB if this server reaches boost Level 3).");
+            eq(Uploads.TooBig("clip.mov", 150 * MB, ctx(0, 3)), "clip.mov is 150 MB. You can send up to 100 MB in this server, thanks to its Level 3 boost (1 GB with Nitro).");
+            eq(Uploads.TooBig("clip.mov", 84 * MB, ctx(3, null)), "clip.mov is 84 MB. You can send up to 50 MB with Nitro Basic (1 GB with Nitro).");
+            eq(Uploads.TooBig("clip.mov", 84 * MB, ctx(1, null)), "clip.mov is 84 MB. You can send up to 50 MB with Nitro Classic (1 GB with Nitro).");
+            eq(Uploads.TooBig("clip.mov", 84 * MB, ctx(3, 0)), "clip.mov is 84 MB. You can send up to 50 MB with Nitro Basic (1 GB with Nitro or 100 MB if this server reaches boost Level 3).");
+            eq(Uploads.TooBig("movie.mkv", 2048 * MB, ctx(2, null)), "movie.mkv is 2 GB. You can send up to 1 GB with Nitro, the most Discord allows.");
+            eq(Uploads.Folder("Photos"), "Photos is a folder. Zip it first to send it.");
+            eq(Uploads.TooMany(new List<string> { "p3.png" }), "Discord allows 10 files per message, so p3.png wasn't attached. Send these first, then add the rest.");
+            eq(Uploads.TooMany(new List<string> { "p3.png", "p4.png" }), "Discord allows 10 files per message, so p3.png and p4.png weren't attached. Send these first, then add the rest.");
+            eq(Uploads.TooMany(new List<string> { "p3.png", "p4.png", "p5.png" }), "Discord allows 10 files per message, so p3.png and 2 more weren't attached. Send these first, then add the rest.");
+            eq(Uploads.Refused(ctx(0, null)), "Discord refused the file as too big, so nothing was sent. You can send up to 20 MB here (50 MB with Nitro Basic or 1 GB with Nitro).");
+            // Discord's refusals, final and named as such; the old "10 MB" text is gone.
+            var e413 = new ApiException(413, null, "Upload failed");
+            var e40005 = new ApiException(400, Json.O("code", 40005L, "message", "Request entity too large"), "");
+            var e50045 = new ApiException(400, Json.O("code", 50045L, "message", "File uploaded exceeds the maximum size"), "");
+            Assert(Uploads.IsTooLarge(e413) && Uploads.IsTooLarge(e40005) && Uploads.IsTooLarge(e50045) && Uploads.IsTooLarge(new AggregateException(e50045)), "too-large refusals");
+            Assert(!Uploads.IsTooLarge(new ApiException(400, Json.O("code", 50035L), "")) && !Uploads.IsTooLarge(new Exception("x")), "other errors aren't");
+            Assert(e413.Message == "Discord refused the file as too big, so nothing was sent." && !e413.Message.Contains("10 MB"), e413.Message);
+            return null;
+        }
+
+        static string UploadCheckTest()
+        {
+            const long MB = UploadLimits.MB;
+            var free = new UploadContext { PremiumType = 0 };
+            Func<string, long, Uploads.Candidate> f = (name, size) => new Uploads.Candidate { Name = name, Size = size };
+            // Over the limit and folders aren't attached; the rest are.
+            var r = Uploads.Check(0, new List<Uploads.Candidate> { f("a.png", MB), f("clip.mov", 84 * MB), new Uploads.Candidate { Name = "Photos", IsFolder = true }, f("b.png", 20 * MB) }, free);
+            Assert(string.Join(",", r.Accepted) == "0,3", "accepted " + string.Join(",", r.Accepted));
+            Assert(r.Notes.Count == 2 && r.Notes[0].StartsWith("clip.mov is 84 MB.") && r.Notes[1] == "Photos is a folder. Zip it first to send it.", string.Join(" | ", r.Notes));
+            // The 10-file cap counts what's already attached.
+            r = Uploads.Check(8, new List<Uploads.Candidate> { f("p1.png", 1), f("p2.png", 1), f("p3.png", 1), f("p4.png", 1) }, free);
+            Assert(string.Join(",", r.Accepted) == "0,1" && r.Notes.Count == 1 && r.Notes[0].Contains("so p3.png and p4.png weren't attached"), string.Join(" | ", r.Notes));
+            var many = new List<Uploads.Candidate>();
+            for (int i = 1; i <= 11; i++) many.Add(f("p" + i + ".png", 1));
+            r = Uploads.Check(0, many, free);
+            Assert(r.Accepted.Count == 10 && r.Notes.Count == 1 && r.Notes[0].Contains("so p11.png wasn't attached"), "an 11th file isn't attached");
+            r = Uploads.Check(10, new List<Uploads.Candidate> { f("x.png", 1) }, free);
+            Assert(r.Accepted.Count == 0 && r.Notes.Count == 1, "a full tray takes nothing more");
+            // Exactly the limit is fine; one byte over isn't.
+            Assert(Uploads.Check(0, new List<Uploads.Candidate> { f("edge.mp4", 20 * MB) }, free).Accepted.Count == 1, "exactly 20 MB fits");
+            Assert(Uploads.Check(0, new List<Uploads.Candidate> { f("edge.mp4", 20 * MB + 1) }, free).Accepted.Count == 0, "20 MB + 1 byte doesn't");
+            // The tray's warnings: orange at 90%, red over the limit.
+            bool over;
+            string w = Uploads.TrayWarning(new List<Uploads.Candidate> { f("a.png", MB), f("big.mp4", 19 * MB) }, free, out over);
+            Assert(w == "big.mp4 is close to the 20 MB limit here." && !over, w);
+            w = Uploads.TrayWarning(new List<Uploads.Candidate> { f("big.mp4", 21 * MB) }, free, out over);
+            Assert(w == "big.mp4 is over the 20 MB limit here. Remove it to send." && over, w);
+            Assert(Uploads.TrayWarning(new List<Uploads.Candidate> { f("a.png", MB) }, free, out over) == null, "no warning well under the limit");
+            Assert(Uploads.Summary(new List<Uploads.Candidate> { f("a.png", MB), f("b.png", MB) }, free) == "2 files, 2 MB. Up to 20 MB each here. Enter sends, Esc removes all.", Uploads.Summary(new List<Uploads.Candidate> { f("a.png", MB), f("b.png", MB) }, free));
+            return null;
+        }
+
+        // A 1x1 GIF89a.
+        static readonly byte[] TinyGif = { 0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 1, 0, 1, 0, 0x80, 0, 0, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0x21, 0xF9, 4, 0, 0, 0, 0, 0, 0x2C, 0, 0, 0, 0, 1, 0, 1, 0, 0, 2, 2, 0x44, 1, 0, 0x3B };
+
+        static string PasteTest()
+        {
+            Func<string[], string, string, string> pick = (formats, text, src) => PastePick.Choose(formats, text, src).ToString();
+            Action<string, string> eq = (got, want) => Assert(got == want, "got \"" + got + "\", want \"" + want + "\"");
+            // Files copied in Explorer attach as files.
+            eq(pick(new[] { "FileDrop", "FileNameW", "FileName" }, null, null), "Files");
+            // Plain copied text pastes as text, even with a picture of it alongside (Word, Excel).
+            eq(pick(new[] { "UnicodeText", "Text" }, "hello there", null), "Text");
+            eq(pick(new[] { "Rich Text Format", "HTML Format", "Bitmap", "UnicodeText" }, "Q3 totals", null), "Text");
+            eq(pick(new[] { "Rich Text Format", "UnicodeText", "Bitmap" }, "https://example.com", null), "Text");
+            // A browser's Copy image: still frames on the clipboard, the original at its address.
+            eq(pick(new[] { "HTML Format", "PNG", "DeviceIndependentBitmap", "Bitmap" }, null, "https://media.tenor.com/abc/dance.gif"), "Remote https://media.tenor.com/abc/dance.gif");
+            eq(pick(new[] { "HTML Format", "UnicodeText", "Bitmap" }, "https://example.com/cat.gif", "https://example.com/cat.gif"), "Remote https://example.com/cat.gif");
+            // GIF data wins over the still PNG next to it; then the original formats as they are.
+            eq(pick(new[] { "PNG", "GIF", "Bitmap" }, null, null), "Data GIF.gif");
+            eq(pick(new[] { "image/gif", "PNG" }, null, "https://x/y.gif"), "Data image/gif.gif");
+            eq(pick(new[] { "JFIF", "Bitmap" }, null, null), "Data JFIF.jpg");
+            eq(pick(new[] { "image/webp" }, null, null), "Data image/webp.webp");
+            eq(pick(new[] { "video/mp4" }, null, null), "Data video/mp4.mp4");
+            eq(pick(new[] { "PNG", "DeviceIndependentBitmap", "Bitmap" }, null, null), "Data PNG.png");
+            // Only a bitmap (Snipping Tool, Print Screen): the one case made into PNG.
+            eq(pick(new[] { "DeviceIndependentBitmap", "Bitmap" }, null, null), "Image");
+            eq(pick(new string[0], null, null), "Text");
+
+            Assert(PastePick.IsJustLink("https://x.com/a.gif") && PastePick.IsJustLink("  ") && !PastePick.IsJustLink("see https://x.com") && !PastePick.IsJustLink("hello"), "IsJustLink");
+            string html = "Version:0.9\r\nStartHTML:0000000105\r\n<html><body>\r\n<!--StartFragment--><img src=\"https://media.tenor.com/abc/dance.gif\" alt=\"dance\"><!--EndFragment-->\r\n</body></html>";
+            eq(PastePick.ImageSrc(html), "https://media.tenor.com/abc/dance.gif");
+            Assert(PastePick.ImageSrc(html.Replace("<img", "Look at this <img")) == null, "a picture with words around it isn't a picture copy");
+            Assert(PastePick.ImageSrc(html.Replace("<!--EndFragment-->", "<img src=\"https://x/2.png\"><!--EndFragment-->")) == null, "two pictures");
+            Assert(PastePick.ImageSrc(html.Replace("https://media.tenor.com/abc/dance.gif", "file:///C:/x.gif")) == null, "only web and data addresses");
+            Assert(PastePick.DataUrl("data:image/gif;base64," + Convert.ToBase64String(TinyGif)).Length == TinyGif.Length, "data: URL");
+
+            // GIF stays GIF: the clipboard's GIF bytes are saved as they are, not through GetImage().
+            var data = new DataObject();
+            data.SetData("GIF", new MemoryStream(TinyGif));
+            using (var bmp = new Bitmap(4, 4)) using (var png = new MemoryStream()) { bmp.Save(png, System.Drawing.Imaging.ImageFormat.Png); data.SetData("PNG", new MemoryStream(png.ToArray())); }
+            var choice = PastePick.Choose(data.GetFormats(false), null, null);
+            Assert(choice.Kind == PastePick.Kind.Data && choice.Format == "GIF", "picked " + choice);
+            var file = ChatForm.PasteLocal(data, choice);
+            Assert(file != null && file.Value.Value == "gif" && Convert.ToBase64String(file.Value.Key) == Convert.ToBase64String(TinyGif), "the GIF's bytes changed");
+            Assert(PastePick.Sniff(TinyGif) == "gif" && PastePick.Sniff(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0 }) == "png"
+                && PastePick.Sniff(new byte[] { 0xFF, 0xD8, 0xFF, 0xE0, 0, 0, 0, 0, 0, 0, 0, 0 }) == "jpg" && PastePick.Sniff(Encoding.ASCII.GetBytes("RIFF0000WEBPVP8 ")) == "webp"
+                && PastePick.Sniff(Encoding.ASCII.GetBytes("0000ftypisom0000")) == "mp4" && PastePick.Sniff(Encoding.ASCII.GetBytes("plain text here")) == null, "Sniff");
+            string path = PastePick.SaveTemp(file.Value.Key, file.Value.Value);
+            try
+            {
+                Assert(Path.GetFileName(path).StartsWith("image-") && path.EndsWith(".gif") && Convert.ToBase64String(File.ReadAllBytes(path)) == Convert.ToBase64String(TinyGif), "saved as " + path);
+                string second = PastePick.SaveTemp(file.Value.Key, "gif");
+                Assert(second != path, "a second paste in the same second gets its own name");
+                File.Delete(second);
+            }
+            finally { File.Delete(path); }
+            return null;
+        }
+
         static JObj FakeRelease(string tag, bool draft, bool pre, params string[] assets)
         {
             var list = new List<object>();
@@ -1128,9 +1399,11 @@ namespace Buzzcord
             server.Close();
             alerts.Close();
             Theme.ForceForTest(false);
+            RenderMentions(s, list, dir);
             for (int i = 0; i < 6; i++) { chat.Size = new Size(chat.Width + 40, chat.Height + 30); Pump(120); }
             Pump(800);
             Capture(chat, Path.Combine(dir, "chat-resized.png"));
+            RenderAttachments(chat, dir);
 
             ProfileForm.Open(s, "200", null);
             Pump(3000);

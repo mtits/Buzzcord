@@ -7,6 +7,7 @@ namespace Buzzcord
     {
         public string Id, Username, GlobalName, Avatar, Discriminator;
         public bool Bot;
+        public int PremiumType;   // 0 none, 1 Nitro Classic, 2 Nitro, 3 Nitro Basic (only sent for yourself)
 
         public string DisplayName
         {
@@ -40,6 +41,7 @@ namespace Buzzcord
             if (j.Has("avatar")) Avatar = j.Str("avatar");
             if (j.Has("discriminator")) Discriminator = j.Str("discriminator");
             if (j.Has("bot")) Bot = j.Bool("bot");
+            if (j.Has("premium_type")) PremiumType = (int)j.Long("premium_type");
         }
     }
 
@@ -219,6 +221,7 @@ namespace Buzzcord
     public class Guild
     {
         public string Id, Name, Icon, OwnerId;
+        public int PremiumTier;   // server boost level 0-3
         public Dictionary<string, Role> Roles = new Dictionary<string, Role>();
         public Dictionary<string, Channel> Channels = new Dictionary<string, Channel>();
         public HashSet<string> MyRoles = new HashSet<string>();
@@ -238,6 +241,7 @@ namespace Buzzcord
             if (props.Has("name")) Name = props.Str("name");
             if (props.Has("icon")) Icon = props.Str("icon");
             if (props.Has("owner_id")) OwnerId = props.Str("owner_id");
+            if (props.Has("premium_tier")) PremiumTier = (int)props.Long("premium_tier");
             if (j.Has("roles"))
             {
                 Roles.Clear();

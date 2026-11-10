@@ -20,6 +20,19 @@ namespace Buzzcord
         readonly Label status = new Label { Dock = DockStyle.Bottom, Height = 20, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(6, 0, 0, 0), ForeColor = Color.DimGray };
         bool pageReady, showingHistory, loading, noMore;
         string oldest;
+        AlertEntry shownNewest;   // the newest history entry on screen
+        bool shownAny;
+
+        // Self-test renders: the mentions inbox (newest first, given the "before" id) instead of
+        // asking Discord.
+        public static Func<string, List<object>> MentionsForTest;
+        public void ShowMentionsTab() { ShowMentions(); }
+        public void LoadOlderMentions() { LoadMentions(); }
+        public string PageText()
+        {
+            try { return web.Document != null && web.Document.Body != null ? web.Document.Body.InnerText ?? "" : ""; }
+            catch (Exception) { return ""; }
+        }
 
         public AlertsForm(Session s, BuddyListForm owner)
         {
@@ -69,9 +82,11 @@ namespace Buzzcord
             Theme.Attach(this, () => Script("setTheme", Theme.ChatCss()));
         }
 
+        // When an alert comes in, add it at the bottom (not when they're only marked seen, so new
+        // ones stay highlighted). The page only scrolls down if you were already at the bottom.
         void OnHistory(Session changed)
         {
-            if (changed == s && showingHistory && !IsDisposed) ShowHistory();
+            if (changed == s && showingHistory && !IsDisposed) HistoryChanged();
         }
 
         void SetTab(bool history)
@@ -101,45 +116,96 @@ namespace Buzzcord
             if (loading || noMore) return;
             loading = true;
             status.Text = "Loading mentions...";
+            if (oldest != null) Script("setOlder", "Loading...");
             try
             {
                 string path = "/users/@me/mentions?limit=25&roles=true&everyone=true" + (oldest != null ? "&before=" + oldest : "");
-                var list = await s.Api.Get(path) as List<object>;
+                List<object> list;
+                if (MentionsForTest != null) list = MentionsForTest(oldest);
+                else list = await s.Api.Get(path) as List<object>;
                 if (showingHistory) return;
-                var sb = new StringBuilder();
-                int n = 0;
-                foreach (var o in list ?? new List<object>())
-                {
-                    var m = o as JObj;
-                    if (m == null) continue;
-                    n++;
-                    oldest = m.Str("id");
-                    var c = s.FindChannel(m.Str("channel_id"));
-                    string where = c != null ? s.ChannelTitle(c) : "a channel you can't see";
-                    sb.Append("<div class=\"day\" style=\"text-align:left\">").Append(MessageHtml.E(where)).Append(" &middot; ")
-                      .Append(MessageHtml.E(Snowflake.Time(m.Str("id")).ToString("MMM d, h:mm tt", CultureInfo.InvariantCulture)));
-                    if (c != null) sb.Append(" &middot; <a href=\"app://channel/").Append(MessageHtml.E(c.Id)).Append("\">open chat</a>");
-                    sb.Append("</div>").Append(MessageHtml.Render(s, m));
-                }
-                if (n < 25) noMore = true;
-                Script("removeMsg", "more");
-                Script("append", sb.ToString());
-                if (!noMore) Script("append", "<div id=\"more\" style=\"text-align:center;margin:8px\"><a href=\"app://more/\">Show older mentions</a></div>");
-                status.Text = oldest == null ? "No mentions. Nice and quiet." : "Mentions from Discord's inbox, newest first.";
+                var page = new List<JObj>();
+                foreach (var o in list ?? new List<object>()) { var m = o as JObj; if (m != null) page.Add(m); }
+                bool first = oldest == null;
+                if (page.Count > 0) oldest = page[page.Count - 1].Str("id");
+                if (page.Count < 25) noMore = true;
+                // Discord sends newest first; the page shows them like a chat, newest at the bottom.
+                // Older pages go in above, keeping your place. The link first, so the first page
+                // still lands exactly at the bottom.
+                Script("setOlder", noMore ? (first ? "" : "<span class=\"t\">No older mentions.</span>") : "<a href=\"app://more/\">Show older mentions</a>");
+                Script(first ? "append" : "prepend", MentionsHtml(s, page));
+                status.Text = oldest == null ? "No mentions. Nice and quiet." : "Mentions from Discord's inbox, newest at the bottom.";
             }
-            catch (Exception ex) { status.Text = ex.Message; }
+            catch (Exception ex)
+            {
+                status.Text = ex.Message;
+                if (!noMore && oldest != null) Script("setOlder", "<a href=\"app://more/\">Show older mentions</a>");
+            }
             finally { loading = false; }
+        }
+
+        // One page of Discord's mentions inbox (newest first, as Discord sends it) as HTML, oldest
+        // first. Public for the self-test.
+        public static string MentionsHtml(Session s, List<JObj> page)
+        {
+            var sb = new StringBuilder();
+            for (int i = page.Count - 1; i >= 0; i--)
+            {
+                var m = page[i];
+                var c = s.FindChannel(m.Str("channel_id"));
+                string where = c != null ? s.ChannelTitle(c) : "a channel you can't see";
+                sb.Append("<div class=\"day\" style=\"text-align:left\">").Append(MessageHtml.E(where)).Append(" &middot; ")
+                  .Append(MessageHtml.E(Snowflake.Time(m.Str("id")).ToString("MMM d, h:mm tt", CultureInfo.InvariantCulture)));
+                if (c != null) sb.Append(" &middot; <a href=\"app://channel/").Append(MessageHtml.E(c.Id)).Append("\">open chat</a>");
+                sb.Append("</div>").Append(MessageHtml.Render(s, m));
+            }
+            return sb.ToString();
         }
 
         // ---- Buzzcord's notification history ----
 
+        // The whole history, oldest at the top and newest at the bottom, opened at the bottom.
         void ShowHistory()
         {
             SetTab(true);
-            var sb = new StringBuilder();
             var list = Notifier.History(s);
-            foreach (var a in list)
+            shownNewest = list.Count > 0 ? list[0] : null;
+            shownAny = list.Count > 0;
+            Script("append", HistoryHtml(list));
+            HistoryStatus();
+            Notifier.MarkSeen(s);
+        }
+
+        // New alerts go at the bottom without redrawing the rest. Cleared: start over.
+        void HistoryChanged()
+        {
+            var list = Notifier.History(s);
+            if (list.Count == 0) { if (shownAny) ShowHistory(); return; }
+            int at = shownNewest != null ? list.IndexOf(shownNewest) : -1;
+            if (at < 0) { ShowHistory(); return; }
+            if (at == 0) return;   // nothing new (only marked seen)
+            shownNewest = list[0];
+            shownAny = true;
+            Script("append", HistoryHtml(list.GetRange(0, at)));
+            HistoryStatus();
+            Notifier.MarkSeen(s);
+        }
+
+        void HistoryStatus()
+        {
+            int n = Notifier.History(s).Count;
+            status.Text = n == 0 ? "Nothing yet. Alerts Buzzcord shows you will be listed here." : n + " alert" + (n == 1 ? "" : "s") + ", newest at the bottom.";
+        }
+
+        // History entries as HTML. `entries` is newest first, as Notifier keeps (and saves) them;
+        // the page shows them oldest first, like a chat log. Unseen ones are highlighted. Public for
+        // the self-test.
+        public static string HistoryHtml(List<AlertEntry> entries)
+        {
+            var sb = new StringBuilder();
+            for (int i = entries.Count - 1; i >= 0; i--)
             {
+                var a = entries[i];
                 sb.Append("<div class=\"m").Append(a.Seen ? "" : " hl").Append("\"><span class=\"t\">(")
                   .Append(MessageHtml.E(a.Time.ToString("MMM d, h:mm tt", CultureInfo.InvariantCulture))).Append(")</span> ")
                   .Append(KindLabel(a.Kind)).Append(" <b>").Append(MessageHtml.E(a.Title)).Append("</b>");
@@ -148,9 +214,7 @@ namespace Buzzcord
                 else if (a.UserId != null) sb.Append(" <a href=\"app://profile/").Append(MessageHtml.E(a.UserId)).Append("\">profile</a>");
                 sb.Append("</div>");
             }
-            Script("append", sb.ToString());
-            status.Text = list.Count == 0 ? "Nothing yet. Alerts Buzzcord shows you will be listed here." : list.Count + " alert" + (list.Count == 1 ? "" : "s") + ", newest first.";
-            Notifier.MarkSeen(s);
+            return sb.ToString();
         }
 
         static string KindLabel(AlertKind k)
