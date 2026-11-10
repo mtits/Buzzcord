@@ -7,6 +7,7 @@ final class User {
     var avatar: String?
     var discriminator: String?
     var bot = false
+    var premiumType = 0   // 0 none, 1 Nitro Classic, 2 Nitro, 3 Nitro Basic (only sent for yourself)
 
     var displayName: String {
         if let g = globalName, !g.isEmpty { return g }
@@ -38,6 +39,7 @@ final class User {
         if j.has("avatar") { avatar = j.str("avatar") }
         if j.has("discriminator") { discriminator = j.str("discriminator") }
         if j.has("bot") { bot = j.bool("bot") }
+        if j.has("premium_type") { premiumType = Int(j.long("premium_type")) }
     }
 }
 
@@ -185,6 +187,7 @@ final class Guild {
     var channels: [String: Channel] = [:]
     var myRoles: Set<String> = []
     var emojis: [JObj] = []
+    var premiumTier = 0   // server boost level 0-3
 
     func iconUrl(_ size: Int) -> String? {
         guard let icon, !icon.isEmpty else { return nil }
@@ -198,6 +201,7 @@ final class Guild {
         if props.has("name") { name = props.str("name") ?? "" }
         if props.has("icon") { icon = props.str("icon") }
         if props.has("owner_id") { ownerId = props.str("owner_id") }
+        if props.has("premium_tier") { premiumTier = Int(props.long("premium_tier")) }
         if j.has("roles") {
             roles.removeAll()
             for r in j.objs("roles") { setRole(r) }

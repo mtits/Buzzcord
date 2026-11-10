@@ -7,9 +7,13 @@ struct ApiError: LocalizedError {
 
     var isCaptcha: Bool { body?.has("captcha_sitekey") == true }
 
+    // Discord said the file is too big: HTTP 413, or error 40005 (request entity too large) or
+    // 50045 (file exceeds the maximum size). The chat window words it for the chat's limit.
+    var isTooLarge: Bool { status == 413 || [40005, 50045].contains(body?.long("code") ?? 0) }
+
     var errorDescription: String? {
         if isCaptcha { return "Discord asked for a captcha and it wasn't solved, so nothing was sent. Try again to get a new one." }
-        if status == 413 { return "That file is too big for Discord (10 MB without Nitro)." }
+        if isTooLarge { return "Discord refused the file as too big, so nothing was sent." }
         var msg = body?.str("message") ?? ""
         if msg.isEmpty { msg = (raw?.count ?? 999) < 200 ? raw ?? "request failed" : "request failed" }
         return "Discord said: \(msg) (\(status))"
@@ -174,7 +178,8 @@ final class Api: @unchecked Sendable {
 
     // Discord's upload flow: ask for an upload slot, PUT the bytes there, then send a message
     // that names the uploaded file.
-    func uploadFile(_ channelId: String, _ file: URL, index: Int) async throws -> JObj {
+    // progress gets 0...1 as the bytes go out (on a background queue).
+    func uploadFile(_ channelId: String, _ file: URL, index: Int, progress: (@Sendable (Double) -> Void)? = nil) async throws -> JObj {
         let size = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         let slot = try await post("/channels/\(channelId)/attachments", ["files": [
             ["filename": file.lastPathComponent, "file_size": size, "id": String(index), "is_clip": false] as JObj,
@@ -186,7 +191,7 @@ final class Api: @unchecked Sendable {
         req.httpMethod = "PUT"
         req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
         req.timeoutInterval = 1800
-        let (_, resp) = try await Api.plain.upload(for: req, fromFile: file)
+        let (_, resp) = try await Api.plain.upload(for: req, fromFile: file, delegate: progress.map(UploadProgress.init))
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         if !(200..<300).contains(code) { throw ApiError(status: code, body: nil, raw: "Upload failed") }
         return ["id": String(index), "filename": file.lastPathComponent, "uploaded_filename": att.str("upload_filename") ?? ""]
@@ -195,6 +200,15 @@ final class Api: @unchecked Sendable {
     static func getString(_ url: String) async throws -> String {
         let (data, _) = try await plain.data(from: URL(string: url)!)
         return String(decoding: data, as: UTF8.self)
+    }
+}
+
+final class UploadProgress: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    let report: @Sendable (Double) -> Void
+    init(_ report: @escaping @Sendable (Double) -> Void) { self.report = report }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64, totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
+        if totalBytesExpectedToSend > 0 { report(Double(totalBytesSent) / Double(totalBytesExpectedToSend)) }
     }
 }
 

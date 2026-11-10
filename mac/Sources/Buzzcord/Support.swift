@@ -103,6 +103,7 @@ enum Theme {
     static let activity = dyn(0x2E8B2E, 0x7BD67B)
     static let selected = dyn(0xDCD0F5, 0x3B2F57)
     static let buzz = Color(red: 0.82, green: 0.2, blue: 0.2)
+    static let overLimit = Color(red: 0.8, green: 0.15, blue: 0.15)
 
     static var header: LinearGradient { LinearGradient(colors: [headerTop, headerBottom], startPoint: .top, endPoint: .bottom) }
 

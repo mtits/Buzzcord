@@ -36,7 +36,9 @@ final class ChatWindowController: AccountWindowController, NSWindowDelegate, WKN
     private var lastTypingSent = Date.distantPast
     private var replyTo: String?
     private var editing: String?
-    private(set) var pendingFiles: [URL] = []
+    @Published private(set) var pendingFiles: [PendingFile] = []
+    @Published var attachNote: String?          // why a file wasn't attached, or Discord refused it
+    @Published private(set) var uploadProgress: Double?   // 0...1 while a file goes up
 
     nonisolated(unsafe) private static var lastOrigin: NSPoint?
 
@@ -343,19 +345,37 @@ final class ChatWindowController: AccountWindowController, NSWindowDelegate, WKN
         if editing != nil { input.string = "" }
         replyTo = nil
         editing = nil
-        pendingFiles.removeAll()
+        if !sending { pendingFiles.removeAll() }
+        attachNote = nil
         banner = nil
     }
 
+    var uploadContext: UploadContext { session.uploadContext(channel) }
+
+    // Attaches files from Send File, drag and drop or paste, after checking them against
+    // Discord's limit for this chat. Files over it, or past the per-message count, aren't
+    // attached, and the note under the tray says why.
     func addFiles(_ urls: [URL]) {
-        pendingFiles += urls.filter { (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true }
-        updateFilesBanner()
+        guard !sending else { return }
+        var cands: [Uploads.Candidate] = [], fileUrls: [URL] = []
+        for u in urls where !pendingFiles.contains(where: { $0.url == u }) {
+            let v = try? u.resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey, .fileSizeKey])
+            if v?.isDirectory == true { cands.append(.init(name: u.lastPathComponent, size: 0, isFolder: true)); fileUrls.append(u); continue }
+            guard v?.isRegularFile == true else { continue }
+            cands.append(.init(name: u.lastPathComponent, size: Int64(v?.fileSize ?? 0)))
+            fileUrls.append(u)
+        }
+        let r = Uploads.check(existing: pendingFiles.count, cands, uploadContext)
+        pendingFiles += r.accepted.map { PendingFile(url: fileUrls[$0], size: cands[$0].size) }
+        attachNote = r.notes.isEmpty ? nil : r.notes.joined(separator: "\n")
+        if !r.notes.isEmpty { NSSound.beep() }
         window?.makeFirstResponder(input)
     }
 
-    private func updateFilesBanner() {
-        if pendingFiles.isEmpty { if replyTo == nil && editing == nil { banner = nil }; return }
-        banner = "Attached: " + pendingFiles.map(\.lastPathComponent).joined(separator: ", ") + "  - press Return to send (Esc to remove)"
+    func removeFile(_ id: UUID) {
+        guard !sending else { return }
+        pendingFiles.removeAll { $0.id == id }
+        attachNote = nil
     }
 
     func wrap(_ w: String) {
@@ -388,10 +408,19 @@ final class ChatWindowController: AccountWindowController, NSWindowDelegate, WKN
         guard !text.isEmpty || !pendingFiles.isEmpty, !sending else { return }
         sending = true
         input.isEditable = false
-        let files = pendingFiles, reply = replyTo, edit = editing
+        let files = pendingFiles, reply = replyTo, edit = editing, ctx = uploadContext
+        // The limit can change after a file was attached (Nitro ended, the server lost a boost).
+        if edit == nil, let big = files.first(where: { $0.size > ctx.limit }) {
+            attachNote = Uploads.tooBig(big.name, big.size, ctx)
+            NSSound.beep()
+            sending = false
+            input.isEditable = session.canSend(channel)
+            return
+        }
         Task {
             defer {
                 sending = false
+                uploadProgress = nil
                 input.isEditable = session.canSend(channel)
                 window?.makeFirstResponder(input)
             }
@@ -401,16 +430,31 @@ final class ChatWindowController: AccountWindowController, NSWindowDelegate, WKN
                 } else {
                     var uploaded: [JObj] = []
                     for (i, f) in files.enumerated() {
-                        statusText = "Uploading \(f.lastPathComponent) (\(i + 1)/\(files.count))..."
-                        uploaded.append(try await session.api.uploadFile(channel.id, f, index: i))
+                        let label = "Uploading \(f.name)" + (files.count > 1 ? " (\(i + 1)/\(files.count))" : "")
+                        statusText = label + "..."
+                        uploadProgress = 0
+                        uploaded.append(try await session.api.uploadFile(channel.id, f.url, index: i) { [weak self] p in
+                            Task { @MainActor in
+                                guard let self, self.sending else { return }
+                                self.uploadProgress = p
+                                self.statusText = label + "... \(Int(p * 100))%"
+                            }
+                        })
                     }
                     try await session.api.sendMessage(channel.id, text, replyTo: reply, attachments: uploaded)
                     statusText = "Sent " + ChatWindowController.stamp(Date())
                 }
                 input.string = ""
                 editing = nil
+                sending = false
                 clearMode()
                 lastTypingSent = .distantPast
+            } catch let e as ApiError where e.isTooLarge {
+                // Discord's answer is final: no retry, no shrinking. The files stay attached so
+                // the user can remove one.
+                statusText = "Not sent: a file is too big for Discord."
+                attachNote = Uploads.refused(ctx)
+                NSSound.beep()
             } catch {
                 statusText = error.localizedDescription
                 showError(error.localizedDescription, title: "Couldn't send")
@@ -527,23 +571,53 @@ final class ClosureMenuItem: NSMenuItem {
 final class LogWebView: WKWebView {
     var onDropFiles: (([URL]) -> Void)?
 
+    override init(frame: CGRect, configuration: WKWebViewConfiguration) {
+        super.init(frame: frame, configuration: configuration)
+        registerForDraggedTypes(NSFilePromiseReceiver.readableDraggedTypes.map { NSPasteboard.PasteboardType($0) })
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        fileURLs(sender).isEmpty ? super.draggingEntered(sender) : .copy
+        DroppedFiles.has(sender) ? .copy : super.draggingEntered(sender)
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        fileURLs(sender).isEmpty ? super.draggingUpdated(sender) : .copy
+        DroppedFiles.has(sender) ? .copy : super.draggingUpdated(sender)
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        let urls = fileURLs(sender)
-        if urls.isEmpty { return false }
-        onDropFiles?(urls)
-        return true
+        guard let onDropFiles else { return false }
+        return DroppedFiles.take(sender, onDropFiles)
+    }
+}
+
+// Files dropped on a chat window: Finder's file URLs, or file promises (Photos, Mail, a
+// picture dragged out of Safari), which are written to the temporary folder first.
+@MainActor
+enum DroppedFiles {
+    static func has(_ sender: NSDraggingInfo) -> Bool {
+        let pb = sender.draggingPasteboard
+        if pb.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) { return true }
+        return pb.canReadObject(forClasses: [NSFilePromiseReceiver.self], options: nil)
     }
 
-    private func fileURLs(_ sender: NSDraggingInfo) -> [URL] {
-        sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+    static func take(_ sender: NSDraggingInfo, _ onFiles: @escaping ([URL]) -> Void) -> Bool {
+        let pb = sender.draggingPasteboard
+        if let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
+            onFiles(urls)
+            return true
+        }
+        guard let promises = pb.readObjects(forClasses: [NSFilePromiseReceiver.self], options: nil) as? [NSFilePromiseReceiver], !promises.isEmpty else { return false }
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("Buzzcord/dropped-" + UUID().uuidString, isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        for p in promises {
+            p.receivePromisedFiles(atDestination: dir, options: [:], operationQueue: .main) { url, error in
+                if let error { Log.write("drop: \(error.localizedDescription)"); return }
+                DispatchQueue.main.async { onFiles([url]) }
+            }
+        }
+        return true
     }
 }
 
@@ -576,29 +650,42 @@ final class InputTextView: NSTextView {
         onChange?()
     }
 
+    // Copied files attach as files; copied pictures and videos attach in their own format (a
+    // GIF stays an animated GIF); copied text pastes as text. See PastePick.
     override func paste(_ sender: Any?) {
         let pb = NSPasteboard.general
-        if let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
-            onFiles?(urls)
-            return
-        }
-        if pb.string(forType: .string) == nil, let img = NSImage(pasteboard: pb), let tiff = img.tiffRepresentation,
-           let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
-            let dir = FileManager.default.temporaryDirectory.appendingPathComponent("Buzzcord", isDirectory: true)
-            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            let f = DateFormatter()
-            f.dateFormat = "yyyyMMdd-HHmmss"
-            let url = dir.appendingPathComponent("image-\(f.string(from: Date())).png")
-            if (try? png.write(to: url)) != nil { onFiles?([url]); return }
+        let items = (pb.pasteboardItems ?? []).map { $0.types.map(\.rawValue) }
+        switch PastePick.choose(items, text: pb.string(forType: .string), canMakeImage: { NSImage.canInit(with: pb) }) {
+        case .files:
+            if let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
+                onFiles?(urls)
+                return
+            }
+        case .data(let want):
+            let urls = PastePick.save(pb, want)
+            if !urls.isEmpty { onFiles?(urls); return }
+        case .imageFallback:
+            if let url = PastePick.saveImageFallback(pb) { onFiles?([url]); return }
+        case .text:
+            break
         }
         pasteAsPlainText(sender)
     }
 
+    override var acceptableDragTypes: [NSPasteboard.PasteboardType] {
+        super.acceptableDragTypes + NSFilePromiseReceiver.readableDraggedTypes.map { NSPasteboard.PasteboardType($0) }
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        DroppedFiles.has(sender) ? .copy : super.draggingEntered(sender)
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        DroppedFiles.has(sender) ? .copy : super.draggingUpdated(sender)
+    }
+
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        if let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
-            onFiles?(urls)
-            return true
-        }
+        if let onFiles, DroppedFiles.take(sender, onFiles) { return true }
         return super.performDragOperation(sender)
     }
 }
@@ -652,6 +739,7 @@ struct ChatView: View {
                     WebHost(web: chat.web)
                         .overlay(RoundedRectangle(cornerRadius: 3).stroke(Theme.accentLight))
                     toolbar
+                    AttachmentTray(chat: chat)
                     if let banner = chat.banner {
                         Button { chat.clearMode() } label: {
                             Text(banner).font(.system(size: 11)).foregroundStyle(Theme.accent).lineLimit(1)

@@ -203,6 +203,11 @@ final class Session: ObservableObject {
         return guilds[gid]
     }
 
+    // What decides the upload limit in this chat: your Nitro, and in a server its boost level.
+    func uploadContext(_ c: Channel) -> UploadContext {
+        UploadContext(premiumType: me?.premiumType ?? 0, guildTier: c.guildId == nil ? nil : (guild(of: c)?.premiumTier ?? 0))
+    }
+
     func title(_ c: Channel?) -> String {
         guard let c else { return "?" }
         if c.isDm { return c.recipientIds.first.map { name($0) } ?? "Direct message" }
