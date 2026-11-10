@@ -10,7 +10,7 @@
 # Privacy & Security > Open Anyway): an Apple Development signature doesn't open on other Macs.
 set -e
 cd "${0:A:h}"
-VERSION=1.4.0
+VERSION=1.5.0
 
 swift build -c release --arch arm64 --arch x86_64 2>&1 | grep -v "^\[" || true
 BIN=".build/apple/Products/Release/Buzzcord"
