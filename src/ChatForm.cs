@@ -40,7 +40,8 @@ namespace Buzzcord
         readonly ToolStripStatusLabel statusLabel = new ToolStripStatusLabel { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
         readonly Dictionary<string, JObj> messages = new Dictionary<string, JObj>();
         readonly Dictionary<string, DateTime> typing = new Dictionary<string, DateTime>();
-        readonly List<string> pendingFiles = new List<string>();
+        readonly AttachmentTray tray;
+        List<string> pendingFiles { get { return tray.Files; } }
         readonly List<JObj> queued = new List<JObj>();   // messages that arrived before the page loaded
         readonly Timer timer = new Timer { Interval = 1000 };
         string oldestId, newestId, replyTo, editing;
@@ -68,6 +69,7 @@ namespace Buzzcord
             AllowDrop = true;
 
             BuildMenu();
+            tray = new AttachmentTray(() => s.UploadContextFor(channel));
 
             header.Paint += PaintHeader;
 
@@ -145,7 +147,10 @@ namespace Buzzcord
             inputRow.Controls.Add(send);
             bottom.Controls.Add(inputRow);
             bottom.Controls.Add(banner);
+            bottom.Controls.Add(tray);
             bottom.Controls.Add(tools);
+            // The attachment strip grows the bottom area instead of squeezing the message box.
+            tray.HeightChanged += () => bottom.Height = 96 + tray.Height;
             banner.Click += (o, e) => ClearMode();
             banner.Cursor = Cursors.Hand;
 
@@ -631,16 +636,8 @@ namespace Buzzcord
             if (editing != null) input.Text = "";
             replyTo = null;
             editing = null;
-            pendingFiles.Clear();
+            tray.ClearAll();
             banner.Height = 0;
-        }
-
-        void UpdateFilesBanner()
-        {
-            if (pendingFiles.Count == 0) { if (replyTo == null && editing == null) banner.Height = 0; return; }
-            var names = new List<string>();
-            foreach (var f in pendingFiles) names.Add(Path.GetFileName(f));
-            ShowBanner("Attached: " + string.Join(", ", names) + "  - press Send (click here to remove)");
         }
 
         void InputKeyDown(object sender, KeyEventArgs e)
@@ -655,7 +652,7 @@ namespace Buzzcord
                 e.SuppressKeyPress = true;
                 input.SelectedText = Environment.NewLine;
             }
-            else if (e.KeyCode == Keys.Escape && (replyTo != null || editing != null || pendingFiles.Count > 0))
+            else if (e.KeyCode == Keys.Escape && (replyTo != null || editing != null || tray.HasContent))
             {
                 e.SuppressKeyPress = true;
                 ClearMode();
@@ -671,33 +668,101 @@ namespace Buzzcord
                 }
                 if (last != null) { e.SuppressKeyPress = true; StartEdit(last); }
             }
-            else if (e.Control && e.KeyCode == Keys.V && Clipboard.ContainsImage())
+            else if ((e.Control && e.KeyCode == Keys.V) || (e.Shift && e.KeyCode == Keys.Insert))
             {
-                e.SuppressKeyPress = true;
-                PasteImage();
-            }
-            else if (e.Control && e.KeyCode == Keys.V && Clipboard.ContainsFileDropList())
-            {
-                e.SuppressKeyPress = true;
-                foreach (var f in Clipboard.GetFileDropList()) if (File.Exists(f)) pendingFiles.Add(f);
-                UpdateFilesBanner();
+                // Plain copied text pastes as text (the text box does it); files and pictures attach.
+                if (Paste()) e.SuppressKeyPress = true;
             }
         }
 
-        void PasteImage()
+        // Ctrl+V: files copied in Explorer attach as files; a picture or video is saved in the
+        // format it came in (a GIF stays an animated GIF) and attached; text is left to the text
+        // box. Returns true when it handled the paste.
+        bool Paste()
         {
+            IDataObject data;
+            string text = null, src = null;
+            var formats = new List<string>();
             try
             {
-                var img = Clipboard.GetImage();
-                if (img == null) return;
-                string dir = Path.Combine(Path.GetTempPath(), "Buzzcord");
-                Directory.CreateDirectory(dir);
-                string path = Path.Combine(dir, "image-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".png");
-                img.Save(path, System.Drawing.Imaging.ImageFormat.Png);
-                pendingFiles.Add(path);
-                UpdateFilesBanner();
+                data = Clipboard.GetDataObject();
+                if (data == null) return false;
+                formats.AddRange(data.GetFormats(false));
+                if (Clipboard.ContainsText()) text = Clipboard.GetText();
+                if (formats.Contains(PastePick.Html)) src = PastePick.ImageSrc(data.GetData(PastePick.Html) as string);
+            }
+            catch (Exception ex) { statusLabel.Text = "Couldn't read the clipboard: " + ex.Message; return false; }
+            var choice = PastePick.Choose(formats, text, src);
+            if (choice.Kind == PastePick.Kind.Text) return false;
+            if (editing != null) return false;
+            try
+            {
+                if (choice.Kind == PastePick.Kind.Files)
+                {
+                    var list = new List<string>();
+                    foreach (var f in Clipboard.GetFileDropList()) list.Add(f);
+                    tray.Add(list);
+                }
+                else if (choice.Kind == PastePick.Kind.Remote) PasteRemote(choice.Url, PasteLocal(data, PastePick.Local(formats)));
+                else AttachPasted(PasteLocal(data, choice));
             }
             catch (Exception ex) { statusLabel.Text = "Couldn't paste: " + ex.Message; }
+            return true;
+        }
+
+        // The clipboard's own bytes for the choice, kept as they are (a bitmap becomes PNG, the
+        // one case with nothing better). Null if there's nothing.
+        public static KeyValuePair<byte[], string>? PasteLocal(IDataObject data, PastePick.Choice c)
+        {
+            if (c == null) return null;
+            if (c.Kind == PastePick.Kind.Data)
+            {
+                byte[] bytes = null;
+                var o = data.GetData(c.Format);
+                var ms = o as MemoryStream;
+                if (ms != null) bytes = ms.ToArray();
+                else if (o is byte[]) bytes = (byte[])o;
+                string ext = PastePick.Sniff(bytes);
+                if (bytes != null && ext != null) return new KeyValuePair<byte[], string>(bytes, ext);
+            }
+            if (c.Kind == PastePick.Kind.Data || c.Kind == PastePick.Kind.Image)
+            {
+                var img = Clipboard.GetImage();
+                if (img == null) return null;
+                using (img)
+                using (var ms = new MemoryStream())
+                {
+                    img.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+                    return new KeyValuePair<byte[], string>(ms.ToArray(), "png");
+                }
+            }
+            return null;
+        }
+
+        // Self-test renders: files in the tray without a dialog.
+        public void AttachForTest(IEnumerable<string> paths) { tray.Add(paths); }
+        public void ClearAttachmentsForTest() { tray.ClearAll(); }
+
+        void AttachPasted(KeyValuePair<byte[], string>? file)
+        {
+            if (file == null) return;
+            tray.Add(new[] { PastePick.SaveTemp(file.Value.Key, file.Value.Value) });
+            input.Focus();
+        }
+
+        // A picture copied in a browser: the clipboard only has a still copy, so fetch the
+        // original from its address (keeps GIF animation and the original JPEG/WebP). If that
+        // fails, the clipboard's own copy is attached instead.
+        async void PasteRemote(string url, KeyValuePair<byte[], string>? fallback)
+        {
+            statusLabel.Text = "Getting the picture...";
+            byte[] original = null;
+            try { original = await PastePick.FetchOriginal(url); }
+            catch (Exception ex) { Program.Log("paste: couldn't fetch the copied picture: " + ex.GetBaseException().Message); }
+            if (IsDisposed) return;
+            statusLabel.Text = "";
+            if (original != null) AttachPasted(new KeyValuePair<byte[], string>(original, PastePick.Sniff(original)));
+            else AttachPasted(fallback);
         }
 
         void PickFiles()
@@ -705,8 +770,7 @@ namespace Buzzcord
             using (var dlg = new OpenFileDialog { Multiselect = true, Title = "Send files", Filter = "All files|*.*|Pictures and videos|*.png;*.jpg;*.jpeg;*.gif;*.webp;*.mp4;*.mov;*.webm" })
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
-                pendingFiles.AddRange(dlg.FileNames);
-                UpdateFilesBanner();
+                tray.Add(dlg.FileNames);
                 input.Focus();
             }
         }
@@ -720,8 +784,7 @@ namespace Buzzcord
         {
             var files = e.Data.GetData(DataFormats.FileDrop) as string[];
             if (files == null) return;
-            foreach (var f in files) if (File.Exists(f)) pendingFiles.Add(f);
-            UpdateFilesBanner();
+            tray.Add(files);
         }
 
         void SendTyping()
@@ -742,6 +805,15 @@ namespace Buzzcord
             string text = input.Text.TrimEnd();
             if (text.Length == 0 && pendingFiles.Count == 0) return;
             if (!send.Enabled) return;
+            var ctx = s.UploadContextFor(channel);
+            if (editing == null && pendingFiles.Count > 0)
+            {
+                // Checked again: the limit may have dropped, or a file changed, since it was attached.
+                var cands = tray.Candidates();
+                foreach (var c in cands)
+                    if (c.Size > ctx.Limit) { tray.Note = Uploads.TooBig(c.Name, c.Size, ctx); return; }
+                if (cands.Count > UploadLimits.MaxFiles) { tray.Note = Uploads.TooMany(new List<string> { cands[UploadLimits.MaxFiles].Name }); return; }
+            }
             send.Enabled = false;
             input.ReadOnly = true;
             try
@@ -753,11 +825,16 @@ namespace Buzzcord
                 else
                 {
                     var uploaded = new List<JObj>();
-                    for (int i = 0; i < pendingFiles.Count; i++)
+                    var files = new List<string>(pendingFiles);
+                    long totalBytes = 0, doneBytes = 0;
+                    foreach (var f in files) totalBytes += new FileInfo(f).Length;
+                    if (files.Count > 0) tray.SetProgress(0);
+                    for (int i = 0; i < files.Count; i++)
                     {
-                        string file = pendingFiles[i];
-                        int n = i + 1, total = pendingFiles.Count;
+                        string file = files[i];
+                        int n = i + 1, total = files.Count;
                         string name = Path.GetFileName(file);
+                        long size = new FileInfo(file).Length, before = doneBytes;
                         var ui = System.Threading.SynchronizationContext.Current;
                         int lastPct = -1;
                         uploaded.Add(await s.Api.UploadFile(channel.Id, file, i, p =>
@@ -765,8 +842,14 @@ namespace Buzzcord
                             int pct = (int)(p * 100);
                             if (pct == lastPct) return;
                             lastPct = pct;
-                            ui.Post(_ => statusLabel.Text = "Uploading " + name + " (" + n + "/" + total + ") " + pct + "%", null);
+                            double overall = totalBytes > 0 ? (before + p * size) / totalBytes : 1;
+                            ui.Post(_ =>
+                            {
+                                statusLabel.Text = "Uploading " + name + " (" + n + "/" + total + ")... " + pct + "%";
+                                tray.SetProgress(overall);
+                            }, null);
                         }));
+                        doneBytes += size;
                     }
                     await s.Api.SendMessage(channel.Id, text, replyTo, uploaded);
                     statusLabel.Text = "Sent " + DateTime.Now.ToString("h:mm tt");
@@ -777,14 +860,22 @@ namespace Buzzcord
             }
             catch (Exception ex)
             {
-                string msg = ex is ApiException && ((ApiException)ex).Status == 413
-                    ? "That file is too big for Discord (10 MB without Nitro)."
-                    : ex.Message;
-                statusLabel.Text = msg;
-                MessageBox.Show(this, msg, "Couldn't send", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                if (Uploads.IsTooLarge(ex))
+                {
+                    // Discord's answer is final: nothing is retried, and the files stay in the tray.
+                    Program.Log("upload refused as too big in " + channel.Id + ": " + ex.GetBaseException().Message);
+                    statusLabel.Text = "Discord refused the file as too big.";
+                    tray.Note = Uploads.Refused(ctx);
+                }
+                else
+                {
+                    statusLabel.Text = ex.Message;
+                    MessageBox.Show(this, ex.Message, "Couldn't send", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
             }
             finally
             {
+                tray.SetProgress(null);
                 send.Enabled = s.CanSend(channel);
                 input.ReadOnly = false;
                 input.Focus();

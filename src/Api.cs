@@ -24,10 +24,16 @@ namespace Buzzcord
 
         public bool IsCaptcha { get { return Body != null && Body.Has("captcha_sitekey"); } }
 
+        // Discord said the file is too big: HTTP 413, or error 40005 / 50045. The chat window
+        // words it for the chat's limit (Uploads.Refused).
+        public bool IsTooLarge { get { long code = Body != null ? Body.Long("code") : 0; return Status == 413 || code == 40005 || code == 50045; } }
+
         static string Describe(int status, JObj body, string raw)
         {
             if (body != null && body.Has("captcha_sitekey"))
                 return "Discord asked for a captcha and it wasn't solved, so nothing was sent. Try again to get a new one.";
+            long code = body != null ? body.Long("code") : 0;
+            if (status == 413 || code == 40005 || code == 50045) return "Discord refused the file as too big, so nothing was sent.";
             string msg = body != null ? body.Str("message") : null;
             if (string.IsNullOrEmpty(msg)) msg = raw != null && raw.Length < 200 ? raw : "request failed";
             return "Discord said: " + msg + " (" + status + ")";

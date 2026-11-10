@@ -211,6 +211,17 @@ namespace Buzzcord
             return c != null && c.GuildId != null && Guilds.TryGetValue(c.GuildId, out g) ? g : null;
         }
 
+        // What decides the upload limit in this chat: your Nitro, and in a server its boost level.
+        public UploadContext UploadContextFor(Channel c)
+        {
+            var g = GuildOf(c);
+            return new UploadContext
+            {
+                PremiumType = Me != null ? Me.PremiumType : 0,
+                GuildTier = c == null || c.GuildId == null ? (int?)null : (g != null ? g.PremiumTier : 0)
+            };
+        }
+
         public string ChannelTitle(Channel c)
         {
             if (c == null) return "?";
