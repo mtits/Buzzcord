@@ -33,9 +33,9 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -247,7 +247,7 @@ fun ChatScreen(s: Session, channelId: String) {
         topBar = {
             TopAppBar(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = BrandPurple, titleContentColor = Color.White, navigationIconContentColor = Color.White),
-                navigationIcon = { IconButton(onClick = { Nav.pop() }) { Icon(Icons.Default.ArrowBack, "Back") } },
+                navigationIcon = { IconButton(onClick = { Nav.pop() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Avatar(s.chatAvatar(c), 34.dp, status = otherId?.let { s.presence(it).status }, fallback = s.title(c))
@@ -309,7 +309,7 @@ fun ChatScreen(s: Session, channelId: String) {
                                 }
                             } else {
                                 IconButton(onClick = { val t = text; text = ""; send(t) }, enabled = text.isNotBlank()) {
-                                    Icon(Icons.Default.Send, "Send", tint = MaterialTheme.colorScheme.primary)
+                                    Icon(Icons.AutoMirrored.Filled.Send, "Send", tint = MaterialTheme.colorScheme.primary)
                                 }
                             }
                         }

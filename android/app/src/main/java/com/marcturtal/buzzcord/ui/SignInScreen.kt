@@ -22,7 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -80,7 +80,7 @@ fun SignInScreen(canGoBack: Boolean) {
             TopAppBar(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = BrandPurple, titleContentColor = Color.White, navigationIconContentColor = Color.White),
                 title = { Text(if (canGoBack) "Add an account" else "Buzzcord") },
-                navigationIcon = { if (canGoBack) IconButton(onClick = { Nav.pop() }) { Icon(Icons.Default.ArrowBack, "Back") } },
+                navigationIcon = { if (canGoBack) IconButton(onClick = { Nav.pop() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
             )
         },
     ) { pad ->
